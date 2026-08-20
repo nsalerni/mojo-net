@@ -220,6 +220,10 @@ struct TCPStream(Movable):
             On socket errors, including the typed `TIMEOUT_ERROR` when a
             read timeout expires.
         """
+        # recv(fd, _, 0) is platform-dependent (Linux can block, macOS
+        # returns 0); make the zero-sized case uniformly a no-op.
+        if len(buf) == 0:
+            return 0
         var n = c_recv(self.fd, buf.unsafe_ptr(), len(buf), c_int(0))
         if n < 0:
             raise os_error("recv")
