@@ -26,6 +26,8 @@ Highlights:
   timeouts (SO_RCVTIMEO / SO_SNDTIMEO). Timeouts surface as the typed
   `TIMEOUT_ERROR`, checked with `is_timeout_error()`.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
+- `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
+  Linux abstract namespace.
 - `SocketAddress`: IPv4 and IPv6 addresses with platform `sockaddr` coding.
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
 
@@ -49,3 +51,4 @@ from .resolver import resolve
 from .sockaddr import SocketAddress
 from .tcp import TCPListener, TCPStream
 from .udp import UDPSocket
+from .unix import UnixListener, UnixStream

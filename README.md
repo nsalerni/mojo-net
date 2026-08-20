@@ -14,6 +14,9 @@ standard library has no socket API yet.
   timeout error), half-close, `TCP_NODELAY`, `bytes_available()`, and
   SIGPIPE suppression on both platforms.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
+- `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
+  Linux abstract namespace, convertible to `TCPStream` for reuse in APIs
+  written against it.
 - `SocketAddress`: IPv4 + IPv6 with the platform `sockaddr` layouts
   (BSD `sin_len` vs Linux `sa_family`) handled internally.
 - `resolve()`: `getaddrinfo` with the macOS/Linux `addrinfo` field-order
@@ -55,9 +58,9 @@ carries that project's gRPC traffic. Standalone by design — it depends only
 on the Mojo standard library, and is the working prototype for a future
 `std.net` proposal to upstream into Mojo itself.
 
-Not here yet: Unix domain sockets, non-blocking I/O with readiness
-polling, and TLS (planned as a sibling package). The sequence and the
-verification each one needs is in [ROADMAP.md](ROADMAP.md).
+Not here yet: non-blocking I/O with readiness polling, and TLS (planned
+as a sibling package). The sequence and the verification each one needs
+is in [ROADMAP.md](ROADMAP.md).
 
 ## License
 

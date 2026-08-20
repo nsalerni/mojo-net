@@ -30,6 +30,8 @@ from std.sys import CompilationTarget
 
 comptime AF_INET = 2
 """Address family for IPv4 (same value on macOS and Linux)."""
+comptime AF_UNIX = 1
+"""Address family for Unix domain sockets (same value on macOS and Linux)."""
 comptime AF_UNSPEC = 0
 """Unspecified address family; lets `getaddrinfo` return both v4 and v6."""
 comptime SOCK_STREAM = 1
@@ -497,6 +499,19 @@ def c_recvfrom(
     return Int(
         external_call["recvfrom", Int](fd, buf, length, flags, addr, addr_len)
     )
+
+
+def c_unlink(mut path: String) -> c_int:
+    """Calls `unlink(2)` to remove a filesystem entry (e.g. a socket file).
+
+    Args:
+        path: The path to remove. Mutable only because passing a C string
+            requires it.
+
+    Returns:
+        0 on success, -1 on failure (errno is set).
+    """
+    return external_call["unlink", c_int](path.as_c_string_slice())
 
 
 def c_inet_pton(af: Int, mut src: String, dst: MutPointer[UInt8, _]) -> c_int:

@@ -5,17 +5,14 @@ differential check against a reference implementation, or it doesn't land.
 For this package the reference is CPython's socket machinery talking to the
 same kernel. Every item below names its verification up front.
 
-## 1. Unix domain sockets
+## 1. Unix domain sockets (shipped)
 
-`UnixListener` / `UnixStream` (and datagram support if it stays cheap),
-with `sockaddr_un` handled for both platforms, the Linux abstract
-namespace, and sane socket-file cleanup semantics. This is the smallest
-item and immediately useful: grpcio speaks `unix:` addresses, so gRPC over
-UDS becomes testable end to end.
-
-Verified by: echo differentials against CPython `AF_UNIX` sockets in both
-directions, permission and stale-socket-file behavior, plus new rows in
-the compliance report.
+`UnixListener` / `UnixStream` with `sockaddr_un` handled for both
+platforms, the Linux abstract namespace, and CPython-matching socket-file
+semantics (bind fails on an existing path unless asked to remove it;
+close leaves the file). Verified by echo differentials against CPython
+`AF_UNIX` sockets in both directions, now part of the standing compliance
+report. Datagram support can follow if a consumer needs it.
 
 ## 2. Non-blocking I/O and readiness polling
 

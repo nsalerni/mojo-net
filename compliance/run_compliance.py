@@ -12,6 +12,7 @@ With --json PATH, also dumps {"sections": {...}} for the umbrella suite.
 
 import argparse
 import json
+import os
 import platform
 import socket
 import subprocess
@@ -156,6 +157,72 @@ def section_net():
     t.join(timeout=30); l6.close()
     record("net", "mojo IPv6 TCP client 100KB roundtrip vs python ::1 server",
            r.returncode == 0 and "OK 100000" in r.stdout,
+           f"rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr[:150]!r}")
+
+    # Unix domain sockets: mojo server, CPython AF_UNIX client.
+    uds1 = f"/tmp/mojo-net-compl-a-{os.getpid()}.sock"
+    proc = subprocess.Popen([str(BUILD / "uds_echo_server"), uds1], stdout=subprocess.PIPE, text=True, cwd=ROOT)
+    proc.stdout.readline()  # READY
+    data = bytes((i * 3 + 5) % 256 for i in range(n))
+    ok, detail = False, ""
+    try:
+        us = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        us.connect(uds1)
+        us.settimeout(30)
+        got = bytearray()
+        def ureader():
+            while len(got) < n:
+                chunk = us.recv(65536)
+                if not chunk:
+                    break
+                got.extend(chunk)
+        t = threading.Thread(target=ureader, daemon=True); t.start()
+        us.sendall(data)
+        us.shutdown(socket.SHUT_WR)
+        t.join(timeout=30)
+        tail = us.recv(65536)
+        ok = bytes(got) == data and tail == b""
+        detail = f"echoed {len(got)}/{n}, clean_eof={tail == b''}"
+        us.close()
+    except Exception as e:
+        detail = repr(e)
+    finally:
+        proc.kill(); proc.wait()
+        try:
+            os.unlink(uds1)
+        except OSError:
+            pass
+    record("net", "mojo unix-socket server echoes 1MiB to CPython AF_UNIX client", ok, detail)
+
+    # CPython server (buffer whole payload, then echo: AF_UNIX in-flight
+    # buffers are tiny, so concurrent echo would deadlock), mojo client.
+    uds2 = f"/tmp/mojo-net-compl-b-{os.getpid()}.sock"
+    try:
+        os.unlink(uds2)
+    except OSError:
+        pass
+    lu = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    lu.bind(uds2); lu.listen(1)
+    def py_uds_echo():
+        c, _ = lu.accept()
+        c.settimeout(30)
+        blob = bytearray()
+        while True:
+            chunk = c.recv(65536)
+            if not chunk:
+                break
+            blob.extend(chunk)
+        c.sendall(bytes(blob))
+        c.close()
+    t = threading.Thread(target=py_uds_echo, daemon=True); t.start()
+    r = run_tool("uds_echo_client", uds2, n, timeout=60)
+    t.join(timeout=30); lu.close()
+    try:
+        os.unlink(uds2)
+    except OSError:
+        pass
+    record("net", "mojo unix-socket client 1MiB roundtrip vs CPython server",
+           r.returncode == 0 and f"OK {n}" in r.stdout,
            f"rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr[:150]!r}")
 
 
