@@ -56,6 +56,7 @@ from .libc import (
 )
 from .poll import PollEvent, Poller
 from .resolver import resolve
+from .stream import IOStream
 from .sockaddr import SocketAddress
 from .tcp import TCPListener, TCPStream
 from .udp import UDPSocket

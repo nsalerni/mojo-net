@@ -41,6 +41,7 @@ from .libc import (
     os_error,
 )
 from .sockaddr import SOCKADDR_STORAGE_LEN
+from .stream import IOStream
 from .tcp import TCPStream, _new_tcp_socket
 
 comptime _SOCKADDR_UN_LEN = 110
@@ -102,7 +103,7 @@ def _pack_sockaddr_un(
 
 
 @fieldwise_init
-struct UnixStream(Movable):
+struct UnixStream(IOStream):
     """A connected Unix domain stream socket.
 
     Obtained from `connect()` or `UnixListener.accept()`. I/O behaves
@@ -197,6 +198,17 @@ struct UnixStream(Movable):
             If the setsockopt call fails.
         """
         self.stream.set_write_timeout(nanos)
+
+    def set_nodelay(self, enabled: Bool) raises:
+        """Accepts the latency hint as a no-op.
+
+        Nagle's algorithm is a TCP concept; Unix domain sockets deliver
+        writes immediately already.
+
+        Args:
+            enabled: Ignored.
+        """
+        _ = enabled
 
     def set_nonblocking(mut self, enabled: Bool) raises:
         """Switches the socket's blocking mode; see `TCPStream`.

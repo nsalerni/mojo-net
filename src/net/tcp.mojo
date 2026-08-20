@@ -24,6 +24,7 @@ from std.sys import CompilationTarget
 from .address import IPv4Address
 from .resolver import resolve
 from .sockaddr import SOCKADDR_STORAGE_LEN, SocketAddress
+from .stream import IOStream
 from .libc import (
     AF_INET,
     F_GETFL,
@@ -73,7 +74,7 @@ def _new_tcp_socket(family: Int = AF_INET) raises -> c_int:
     return fd
 
 
-struct TCPStream(Movable):
+struct TCPStream(IOStream):
     """A connected, blocking TCP stream.
 
     Obtained from `connect()`/`connect_addr()` on the client side or
