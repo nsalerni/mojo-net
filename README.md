@@ -17,6 +17,9 @@ standard library has no socket API yet.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
   Linux abstract namespace, convertible to `TCPStream` for reuse in APIs
   written against it.
+- Non-blocking mode (`set_nonblocking`, typed would-block error,
+  `write_some`, non-blocking connect) and a `Poller` over kqueue/epoll:
+  everything a single-threaded event loop needs.
 - `SocketAddress`: IPv4 + IPv6 with the platform `sockaddr` layouts
   (BSD `sin_len` vs Linux `sa_family`) handled internally.
 - `resolve()`: `getaddrinfo` with the macOS/Linux `addrinfo` field-order
@@ -58,9 +61,8 @@ carries that project's gRPC traffic. Standalone by design — it depends only
 on the Mojo standard library, and is the working prototype for a future
 `std.net` proposal to upstream into Mojo itself.
 
-Not here yet: non-blocking I/O with readiness polling, and TLS (planned
-as a sibling package). The sequence and the verification each one needs
-is in [ROADMAP.md](ROADMAP.md).
+Not here yet: TLS, planned as a sibling package. The sequence and the
+verification it needs is in [ROADMAP.md](ROADMAP.md).
 
 ## License
 

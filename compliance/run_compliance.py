@@ -15,9 +15,11 @@ import json
 import os
 import platform
 import socket
+import selectors
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -224,6 +226,105 @@ def section_net():
     record("net", "mojo unix-socket client 1MiB roundtrip vs CPython server",
            r.returncode == 0 and f"OK {n}" in r.stdout,
            f"rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr[:150]!r}")
+
+    # One single-threaded Poller event loop serving 20 concurrent CPython
+    # clients, each echoing 100 KB.
+    clients = 20
+    per_client = 100_000
+    proc = subprocess.Popen([str(BUILD / "poll_echo_server"), str(clients)],
+                            stdout=subprocess.PIPE, text=True, cwd=ROOT)
+    pport = int(proc.stdout.readline().strip().removeprefix("PORT "))
+    failures = []
+    def one_client(idx: int):
+        try:
+            cs = socket.create_connection(("127.0.0.1", pport), timeout=10)
+            cs.settimeout(30)
+            payload = bytes((i + idx) % 256 for i in range(per_client))
+            got = bytearray()
+            def rd():
+                while len(got) < per_client:
+                    chunk = cs.recv(65536)
+                    if not chunk:
+                        break
+                    got.extend(chunk)
+            rt = threading.Thread(target=rd, daemon=True); rt.start()
+            cs.sendall(payload)
+            cs.shutdown(socket.SHUT_WR)
+            rt.join(timeout=30)
+            if bytes(got) != payload:
+                failures.append(f"client {idx}: {len(got)}/{per_client}")
+            cs.close()
+        except Exception as e:
+            failures.append(f"client {idx}: {e!r}")
+    threads = [threading.Thread(target=one_client, args=(i,)) for i in range(clients)]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=60)
+    served_line = ""
+    try:
+        proc.wait(timeout=30)
+        served_line = proc.stdout.read().strip()
+    except Exception:
+        proc.kill()
+    record("net", f"one Poller event loop echoes to {clients} concurrent CPython clients",
+           not failures and f"SERVED {clients}" in served_line,
+           "; ".join(failures[:3]) + f" [{served_line!r}]")
+
+    # Readiness semantics agree with CPython's selectors module: run one
+    # scripted peer scenario past both observers and diff the sequences.
+    def scenario_server():
+        c, _ = ssock.accept()
+        time.sleep(0.2)
+        c.sendall(b"hello")
+        time.sleep(0.2)
+        c.close()
+    def python_observer(port: int) -> list[str]:
+        sel = selectors.DefaultSelector()
+        obs = socket.create_connection(("127.0.0.1", port), timeout=10)
+        obs.setblocking(False)
+        sel.register(obs, selectors.EVENT_READ | selectors.EVENT_WRITE)
+        seq = []
+        reported_writable = False
+        for _ in range(50):
+            events = sel.select(timeout=5)
+            readable = any(ev & selectors.EVENT_READ for _, ev in events)
+            writable = any(ev & selectors.EVENT_WRITE for _, ev in events)
+            if writable and not reported_writable:
+                seq.append("writable")
+                reported_writable = True
+                sel.modify(obs, selectors.EVENT_READ)
+            if readable:
+                drained = 0
+                eof = False
+                while True:
+                    try:
+                        chunk = obs.recv(4096)
+                    except BlockingIOError:
+                        break
+                    if not chunk:
+                        eof = True
+                        break
+                    drained += len(chunk)
+                if drained:
+                    seq.append(f"readable data={drained}")
+                if eof:
+                    seq.append("eof")
+                    obs.close()
+                    sel.close()
+                    return seq
+        return seq + ["<incomplete>"]
+
+    ssock = socket.socket(); ssock.bind(("127.0.0.1", 0)); ssock.listen(2)
+    sport = ssock.getsockname()[1]
+    t = threading.Thread(target=scenario_server, daemon=True); t.start()
+    py_seq = python_observer(sport)
+    t.join(timeout=10)
+    t = threading.Thread(target=scenario_server, daemon=True); t.start()
+    r = run_tool("poll_state_probe", sport, timeout=30)
+    t.join(timeout=10); ssock.close()
+    mojo_seq = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+    record("net", "Poller readiness sequence matches CPython selectors",
+           py_seq == mojo_seq and "eof" in py_seq,
+           f"python={py_seq} mojo={mojo_seq} rc={r.returncode} err={r.stderr[:120]!r}")
 
 
 # --------------------------------------------------------------- report ---

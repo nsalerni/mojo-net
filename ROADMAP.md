@@ -14,19 +14,16 @@ close leaves the file). Verified by echo differentials against CPython
 `AF_UNIX` sockets in both directions, now part of the standing compliance
 report. Datagram support can follow if a consumer needs it.
 
-## 2. Non-blocking I/O and readiness polling
+## 2. Non-blocking I/O and readiness polling (shipped)
 
-`set_nonblocking()` on sockets, a typed would-block error alongside the
-existing typed timeout, and a `Poller` built on kqueue (macOS) and epoll
-(Linux) with register/modify/remove/wait. Mojo has no async or threads
-yet, but none are needed for an event loop: this makes single-threaded
-concurrent servers possible today, which is the biggest current limitation
-of the gRPC server built on this package.
-
-Verified by: readiness semantics compared against CPython's `selectors`
-module (would-block vs EOF, connect-in-progress, spurious wakeup
-handling), and a stress check where one non-blocking echo server serves
-many concurrent CPython clients.
+`set_nonblocking()` with a typed would-block error, `write_some` as the
+partial-write primitive, non-blocking connect with `connect_error()`, and
+a `Poller` over kqueue (macOS) and epoll (Linux). Verified by a readiness
+sequence diffed line-for-line against CPython's `selectors` module and by
+a single-threaded Poller event loop echoing to twenty concurrent CPython
+clients, both now standing compliance checks. The gRPC server built on
+this package can now drop its one-connection-at-a-time limitation; that
+work happens in the grpc-mojo repo.
 
 ## 3. TLS, as a sibling package
 

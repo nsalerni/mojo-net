@@ -30,6 +30,8 @@ Highlights:
   Linux abstract namespace.
 - `SocketAddress`: IPv4 and IPv6 addresses with platform `sockaddr` coding.
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
+- `Poller`: readiness polling over kqueue/epoll for non-blocking sockets
+  (`set_nonblocking`, `write_some`, `connect_addr_nonblocking`).
 
 Example:
 
@@ -46,7 +48,13 @@ def main() raises:
 """
 
 from .address import IPv4Address
-from .libc import TIMEOUT_ERROR, is_timeout_error
+from .libc import (
+    TIMEOUT_ERROR,
+    WOULD_BLOCK_ERROR,
+    is_timeout_error,
+    is_would_block,
+)
+from .poll import PollEvent, Poller
 from .resolver import resolve
 from .sockaddr import SocketAddress
 from .tcp import TCPListener, TCPStream

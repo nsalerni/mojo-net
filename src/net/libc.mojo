@@ -137,6 +137,53 @@ comptime IPPROTO_TCP = 6
 """Protocol level for TCP socket options (same value on macOS and Linux)."""
 comptime TCP_NODELAY = 1
 """TCP option that disables Nagle's algorithm (same value on both OSes)."""
+comptime F_GETFL = 3
+"""`fcntl(2)` command that reads a descriptor's status flags."""
+comptime F_SETFL = 4
+"""`fcntl(2)` command that writes a descriptor's status flags."""
+
+
+def o_nonblock() -> c_int:
+    """Returns the platform's O_NONBLOCK status flag.
+
+    Returns:
+        0x0004 on macOS, 0x800 on Linux.
+    """
+    comptime if CompilationTarget.is_macos():
+        return c_int(0x0004)
+    else:
+        return c_int(0x800)
+
+
+def so_error() -> c_int:
+    """Returns the platform's SO_ERROR socket option name.
+
+    Reading it fetches and clears a socket's pending error — the way a
+    non-blocking `connect(2)` reports its outcome once the socket polls
+    writable.
+
+    Returns:
+        0x1007 on macOS, 4 on Linux.
+    """
+    comptime if CompilationTarget.is_macos():
+        return c_int(0x1007)
+    else:
+        return c_int(4)
+
+
+def einprogress() -> Int:
+    """Returns the platform's EINPROGRESS errno value.
+
+    A non-blocking `connect(2)` fails with this errno while the handshake
+    is still underway; the socket becomes writable when it completes.
+
+    Returns:
+        36 on macOS, 115 on Linux.
+    """
+    comptime if CompilationTarget.is_macos():
+        return 36
+    else:
+        return 115
 
 
 # --- errno ---
@@ -177,6 +224,30 @@ def os_error(var context: String) -> Error:
         if e.value == 11:  # EAGAIN/EWOULDBLOCK on Linux
             return Error(TIMEOUT_ERROR)
     return Error(context + ": errno " + String(e.value))
+
+
+comptime WOULD_BLOCK_ERROR = "net: would block"
+"""Message carried by every would-block `Error` raised in this package.
+
+Raised when an operation on a socket in non-blocking mode cannot proceed
+without waiting. Check with `is_would_block()` rather than comparing
+strings directly, and use a `Poller` to learn when to retry.
+"""
+
+
+def is_would_block(e: Error) -> Bool:
+    """Reports whether an error means "retry when the socket is ready".
+
+    True exactly when a read or write on a socket placed in non-blocking
+    mode (`set_nonblocking(True)`) could not proceed immediately.
+
+    Args:
+        e: The error to inspect.
+
+    Returns:
+        True if the error is the typed `WOULD_BLOCK_ERROR`.
+    """
+    return String(e) == WOULD_BLOCK_ERROR
 
 
 def is_timeout_error(e: Error) -> Bool:
@@ -498,6 +569,43 @@ def c_recvfrom(
     """
     return Int(
         external_call["recvfrom", Int](fd, buf, length, flags, addr, addr_len)
+    )
+
+
+def c_fcntl(fd: c_int, cmd: Int, arg: Int) -> c_int:
+    """Calls `fcntl(2)` with an integer argument.
+
+    Args:
+        fd: The file descriptor.
+        cmd: The fcntl command, e.g. `F_GETFL` or `F_SETFL`.
+        arg: The command's integer argument (0 for F_GETFL).
+
+    Returns:
+        The command's result (the flags for F_GETFL, 0 for F_SETFL), or a
+        negative value on failure (errno is set).
+    """
+    return external_call["fcntl", c_int, num_fixed_args=2](
+        fd, c_int(cmd), c_int(arg)
+    )
+
+
+def c_getsockopt_int(
+    fd: c_int, level: c_int, name: c_int, value: MutPointer[c_int, _]
+) -> c_int:
+    """Calls `getsockopt(2)` for a 4-byte integer option value.
+
+    Args:
+        fd: The socket file descriptor.
+        level: Option level, e.g. `sol_socket()`.
+        name: Option name, e.g. `so_error()`.
+        value: Output location for the option value.
+
+    Returns:
+        0 on success, -1 on failure (errno is set).
+    """
+    var optlen = c_int(4)
+    return external_call["getsockopt", c_int](
+        fd, level, name, value, Pointer(to=optlen)
     )
 
 

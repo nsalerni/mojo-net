@@ -18,7 +18,7 @@ suppressed on both platforms (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on
 Linux).
 """
 
-from std.ffi import c_int
+from std.ffi import c_int, get_errno
 from std.sys import CompilationTarget
 
 from .address import IPv4Address
@@ -26,7 +26,10 @@ from .resolver import resolve
 from .sockaddr import SOCKADDR_STORAGE_LEN, SocketAddress
 from .libc import (
     AF_INET,
+    F_GETFL,
+    F_SETFL,
     SHUT_WR,
+    WOULD_BLOCK_ERROR,
     SOCK_STREAM,
     TCP_NODELAY,
     IPPROTO_TCP,
@@ -44,9 +47,15 @@ from .libc import (
     c_send,
     c_setsockopt_int,
     c_shutdown,
+    c_fcntl,
+    c_getsockopt_int,
     c_socket,
+    einprogress,
+    is_timeout_error,
     msg_nosignal,
+    o_nonblock,
     os_error,
+    so_error,
     so_nosigpipe,
     so_reuseaddr,
     sol_socket,
@@ -76,6 +85,8 @@ struct TCPStream(Movable):
     """The underlying socket file descriptor."""
     var closed: Bool
     """True once the descriptor has been closed via `close()`."""
+    var nonblocking: Bool
+    """True while the descriptor is in non-blocking mode."""
 
     def __init__(out self, fd: c_int):
         """Wraps an already-connected socket file descriptor.
@@ -88,6 +99,15 @@ struct TCPStream(Movable):
         """
         self.fd = fd
         self.closed = False
+        self.nonblocking = False
+
+    def _io_error(self, var context: String) -> Error:
+        # EAGAIN means "timeout expired" on a blocking socket but "retry
+        # when ready" on a non-blocking one; pick the right typed error.
+        var err = os_error(context^)
+        if self.nonblocking and is_timeout_error(err):
+            return Error(WOULD_BLOCK_ERROR)
+        return err
 
     @staticmethod
     def connect(host: StringSpan, port: UInt16) raises -> TCPStream:
@@ -143,6 +163,43 @@ struct TCPStream(Movable):
             _ = c_close(fd)
             raise err
         return TCPStream(fd)
+
+    @staticmethod
+    def connect_addr_nonblocking(addr: SocketAddress) raises -> TCPStream:
+        """Starts a non-blocking connect to an already-resolved address.
+
+        The returned stream is in non-blocking mode and the handshake may
+        still be in flight: poll the descriptor for writability, then call
+        `connect_error()` to learn the outcome.
+
+        Args:
+            addr: The destination address and port.
+
+        Returns:
+            A stream whose connection may still be in progress.
+
+        Raises:
+            If socket creation fails, or the connect fails immediately
+            with anything other than in-progress.
+        """
+        var fd = _new_tcp_socket(addr.family())
+        var flags = c_fcntl(fd, F_GETFL, 0)
+        if flags < 0 or c_fcntl(fd, F_SETFL, Int(flags | o_nonblock())) < 0:
+            var ferr = os_error("fcntl(O_NONBLOCK)")
+            _ = c_close(fd)
+            raise ferr
+        var packed = addr.to_sockaddr()
+        if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) != 0:
+            var e = get_errno()
+            if Int(e.value) != einprogress():
+                var err = Error(
+                    "connect " + String(addr) + ": errno " + String(e.value)
+                )
+                _ = c_close(fd)
+                raise err
+        var stream = TCPStream(fd)
+        stream.nonblocking = True
+        return stream^
 
     def set_read_timeout(self, nanos: Int64) raises:
         """Sets SO_RCVTIMEO so blocking reads fail after this long.
@@ -203,6 +260,54 @@ struct TCPStream(Movable):
         ):
             raise os_error("setsockopt(TCP_NODELAY)")
 
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches the socket between blocking and non-blocking mode.
+
+        In non-blocking mode, reads and writes that cannot proceed raise
+        the typed `WOULD_BLOCK_ERROR` (check with `is_would_block()`)
+        instead of waiting; use a `Poller` to learn when to retry.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking.
+
+        Raises:
+            If the fcntl calls fail.
+        """
+        var flags = c_fcntl(self.fd, F_GETFL, 0)
+        if flags < 0:
+            raise os_error("fcntl(F_GETFL)")
+        var updated: c_int
+        if enabled:
+            updated = flags | o_nonblock()
+        else:
+            updated = flags & ~o_nonblock()
+        if c_fcntl(self.fd, F_SETFL, Int(updated)) < 0:
+            raise os_error("fcntl(F_SETFL)")
+        self.nonblocking = enabled
+
+    def connect_error(self) raises -> Int:
+        """Reads and clears the socket's pending error (SO_ERROR).
+
+        After a non-blocking connect reports the socket writable, this
+        tells whether the handshake succeeded (0) or the errno it failed
+        with (e.g. 61/111 for a refused connection).
+
+        Returns:
+            0 if the connection succeeded, the failure errno otherwise.
+
+        Raises:
+            If the getsockopt call fails.
+        """
+        var value = c_int(0)
+        if (
+            c_getsockopt_int(
+                self.fd, sol_socket(), so_error(), Pointer(to=value)
+            )
+            != 0
+        ):
+            raise os_error("getsockopt(SO_ERROR)")
+        return Int(value)
+
     def read(self, mut buf: List[Byte]) raises -> Int:
         """Reads up to len(buf) bytes; resizes buf to what was read.
 
@@ -226,7 +331,7 @@ struct TCPStream(Movable):
             return 0
         var n = c_recv(self.fd, buf.unsafe_ptr(), len(buf), c_int(0))
         if n < 0:
-            raise os_error("recv")
+            raise self._io_error("recv")
         buf.shrink(n)
         return n
 
@@ -252,7 +357,7 @@ struct TCPStream(Movable):
             chunk.resize(n - len(out), 0)
             var got = c_recv(self.fd, chunk.unsafe_ptr(), len(chunk), c_int(0))
             if got < 0:
-                raise os_error("recv")
+                raise self._io_error("recv")
             if got == 0:
                 raise Error("connection closed mid-read (EOF)")
             out.extend(chunk[:got])
@@ -277,8 +382,33 @@ struct TCPStream(Movable):
                 msg_nosignal(),
             )
             if n < 0:
-                raise os_error("send")
+                raise self._io_error("send")
             sent += n
+
+    def write_some(self, data: Span[Byte, _]) raises -> Int:
+        """Writes as much of the span as fits right now, without looping.
+
+        The partial-write primitive for non-blocking sockets: where
+        `write_all` loops until everything is sent (and so cannot report
+        progress when a non-blocking write stalls midway), this performs a
+        single send and returns how many bytes the kernel accepted.
+
+        Args:
+            data: The bytes to offer.
+
+        Returns:
+            The number of bytes accepted (at least 1 for non-empty data).
+
+        Raises:
+            The typed `WOULD_BLOCK_ERROR` when a non-blocking socket
+            cannot accept any bytes, or other socket errors.
+        """
+        if len(data) == 0:
+            return 0
+        var n = c_send(self.fd, data.unsafe_ptr(), len(data), msg_nosignal())
+        if n < 0:
+            raise self._io_error("send")
+        return n
 
     def bytes_available(self) -> Int:
         """Reports the bytes readable right now without blocking.

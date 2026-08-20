@@ -198,6 +198,17 @@ struct UnixStream(Movable):
         """
         self.stream.set_write_timeout(nanos)
 
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches the socket's blocking mode; see `TCPStream`.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking.
+
+        Raises:
+            If the fcntl calls fail.
+        """
+        self.stream.set_nonblocking(enabled)
+
     def bytes_available(self) -> Int:
         """Reports bytes readable without blocking; see `TCPStream`.
 
