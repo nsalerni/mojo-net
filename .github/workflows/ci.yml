@@ -46,7 +46,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: compliance-report-${{ matrix.os }}
-          path: COMPLIANCE.md
+          path: |
+            COMPLIANCE.md
+            COMPLIANCE.html
 
       - name: Package build (pixi-build-mojo)
         run: pixi build
