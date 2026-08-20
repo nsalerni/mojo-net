@@ -1,0 +1,37 @@
+# mojo-net — blocking TCP/UDP sockets, DNS, IPv4/IPv6 for Mojo 1.0.
+#
+# Inside the grpc-mojo monorepo this manifest is a self-contained dev
+# workspace; at publish time the [package] section below is finalized for
+# the pixi-build-mojo backend (see ../../docs/PACKAGING.md).
+
+[workspace]
+channels = ["https://conda.modular.com/max", "conda-forge"]
+name = "mojo-net"
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+version = "0.1.0"
+license = "Apache-2.0"
+preview = ["pixi-build"]
+
+[tasks]
+test = "python3 tools/run_tests.py"
+compliance = "python3 compliance/run_compliance.py"
+bench = "mojo run -I src bench/bench_net.mojo"
+bench-smoke = "mojo run -I src bench/bench_net.mojo --smoke"
+
+[dependencies]
+mojo = ">=1.0.0,<2"
+python = ">=3.11"
+
+[package]
+name = "mojo-net"
+version = "0.1.0"
+
+[package.build]
+backend = { name = "pixi-build-mojo", version = "0.*" }
+
+[package.build-dependencies]
+mojo-compiler = ">=1.0.0,<2"
+
+[package.build.config.pkg]
+name = "net"
+path = "src/net"

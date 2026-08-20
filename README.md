@@ -1,0 +1,62 @@
+# mojo-net
+
+[![CI](https://github.com/nsalerni/mojo-net/actions/workflows/ci.yml/badge.svg)](https://github.com/nsalerni/mojo-net/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
+Blocking TCP/UDP sockets, DNS resolution, and IPv4/IPv6 addressing for
+**Mojo 1.0**, built on libc via `std.ffi.external_call` — because Mojo's
+standard library has no socket API yet.
+
+- `TCPListener` / `TCPStream`: blocking streams with hostname resolution,
+  read/write timeouts (`SO_RCVTIMEO`/`SO_SNDTIMEO` surfaced as a typed
+  timeout error), half-close, `TCP_NODELAY`, `bytes_available()`, and
+  SIGPIPE suppression on both platforms.
+- `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
+- `SocketAddress`: IPv4 + IPv6 with the platform `sockaddr` layouts
+  (BSD `sin_len` vs Linux `sa_family`) handled internally.
+- `resolve()`: `getaddrinfo` with the macOS/Linux `addrinfo` field-order
+  difference accounted for.
+
+Supported platforms: macOS (arm64) and Linux (x86-64, arm64).
+
+## Example
+
+```mojo
+from net import TCPListener, TCPStream
+
+def main() raises:
+    var listener = TCPListener("127.0.0.1", 0)  # port 0 = pick a free port
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server_side = listener.accept()
+    client.write_all("hello".as_bytes())
+    var data = server_side.read_exact(5)
+```
+
+## Verification
+
+Correctness is established differentially against **CPython's socket
+module** (the OS truth for TCP/UDP semantics): echo servers and clients on
+both sides, IPv6, UDP, and `getaddrinfo` agreement. The current results
+live in [COMPLIANCE.md](COMPLIANCE.md); CI regenerates the report on every
+push.
+
+```sh
+pixi run test          # unit tests (incl. error paths, timeouts, SIGPIPE)
+pixi run compliance    # differential suite vs CPython; rewrites COMPLIANCE.md
+pixi run bench         # loopback throughput/latency benchmarks
+```
+
+## Status
+
+Extracted from [grpc-mojo](https://github.com/nsalerni/grpc-mojo), where it
+carries that project's gRPC traffic. Standalone by design — it depends only
+on the Mojo standard library, and is the working prototype for a future
+`std.net` proposal to upstream into Mojo itself.
+
+Not yet implemented: non-blocking/async I/O (Mojo 1.0 has no public
+async or threads), TLS, Unix domain sockets.
+
+## License
+
+[Apache-2.0](LICENSE). Not affiliated with Modular; "Mojo" is a trademark
+of Modular Inc.
