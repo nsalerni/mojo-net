@@ -55,8 +55,9 @@ carries that project's gRPC traffic. Standalone by design — it depends only
 on the Mojo standard library, and is the working prototype for a future
 `std.net` proposal to upstream into Mojo itself.
 
-Not yet implemented: non-blocking/async I/O (Mojo 1.0 has no public
-async or threads), TLS, Unix domain sockets.
+Not here yet: Unix domain sockets, non-blocking I/O with readiness
+polling, and TLS (planned as a sibling package). The sequence and the
+verification each one needs is in [ROADMAP.md](ROADMAP.md).
 
 ## License
 
