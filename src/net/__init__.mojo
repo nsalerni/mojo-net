@@ -32,6 +32,8 @@ Highlights:
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
 - `Poller`: readiness polling over kqueue/epoll for non-blocking sockets
   (`set_nonblocking`, `write_some`, `connect_addr_nonblocking`).
+- `ReadinessStream`: the shared descriptor and partial-I/O contract
+  implemented by TCP and Unix streams.
 
 Example:
 
@@ -56,7 +58,7 @@ from .libc import (
 )
 from .poll import PollEvent, Poller
 from .resolver import resolve
-from .stream import IOStream
+from .stream import IOStream, ReadinessStream
 from .sockaddr import SocketAddress
 from .tcp import TCPListener, TCPStream
 from .udp import UDPSocket

@@ -18,7 +18,13 @@ Run: `pixi run bench`. Pass `--smoke` for a milliseconds-long CI run.
 from std.benchmark import Unit, run
 from std.sys import argv
 
-from net import SocketAddress, TCPListener, TCPStream, UDPSocket
+from net import (
+    ReadinessStream,
+    SocketAddress,
+    TCPListener,
+    TCPStream,
+    UDPSocket,
+)
 
 
 def is_smoke() -> Bool:
@@ -54,6 +60,24 @@ def report_line(name: StringSpan, ns_per_op: Float64, bytes_per_op: Int):
     )
 
 
+def readiness_roundtrip[
+    S: ReadinessStream
+](mut client: S, mut server: S, payload: Span[Byte, _]) raises:
+    """Performs one trait-generic partial-I/O round trip."""
+    var sent = client.write_some(payload)
+    if sent != len(payload):
+        raise Error("benchmark partial write")
+    var got = List[Byte](length=len(payload), fill=0)
+    if server.read(got) != len(payload):
+        raise Error("benchmark partial read")
+    sent = server.write_some(Span(got))
+    if sent != len(got):
+        raise Error("benchmark partial write")
+    var back = List[Byte](length=len(payload), fill=0)
+    if client.read(back) != len(payload):
+        raise Error("benchmark partial read")
+
+
 def main() raises:
     var secs = bench_time()
 
@@ -77,6 +101,12 @@ def main() raises:
 
     var r = run_capped(tcp_rtt, secs)
     report_line("tcp 64B round trip", r, 128)
+
+    def readiness_rtt() raises {mut client, mut server_side, ping}:
+        readiness_roundtrip(client, server_side, Span(ping))
+
+    r = run_capped(readiness_rtt, secs)
+    report_line("readiness trait 64B round trip", r, 128)
 
     # --- TCP bulk: 64 KiB one way, drained by the peer in-loop ---
     var chunk = List[Byte]()

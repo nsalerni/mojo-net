@@ -18,7 +18,8 @@ report. Datagram support can follow if a consumer needs it.
 
 `set_nonblocking()` with a typed would-block error, `write_some` as the
 partial-write primitive, non-blocking connect with `connect_error()`, and
-a `Poller` over kqueue (macOS) and epoll (Linux). Verified by a readiness
+a `ReadinessStream` trait shared by TCP and Unix sockets, plus a `Poller` over
+kqueue (macOS) and epoll (Linux). Verified by a readiness
 sequence diffed line-for-line against CPython's `selectors` module and by
 a single-threaded Poller event loop echoing to twenty concurrent CPython
 clients, both now standing compliance checks. The gRPC server built on
