@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.1.0 — 2026-08-19
+## 0.2.0 - 2026-08-20
+
+- Added `UnixListener` and `UnixStream`, including Linux abstract namespace
+  addresses.
+- Added nonblocking socket operations and `Poller` readiness polling over
+  kqueue on macOS and epoll on Linux.
+- Introduced the `IOStream` trait so protocol packages can share TCP, Unix,
+  and secure stream implementations.
+- Package builds now produce an installed `net.mojoc` module with a strict
+  Mojo 1.0 compiler bound and a clean consumer compilation gate.
+
+## 0.1.0 - 2026-08-19
 
 Initial release.
 
