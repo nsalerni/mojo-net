@@ -50,5 +50,5 @@ jobs:
             COMPLIANCE.md
             COMPLIANCE.html
 
-      - name: Package build (pixi-build-mojo)
-        run: pixi build
+      - name: Package build and installed import smoke
+        run: pixi run package-smoke
