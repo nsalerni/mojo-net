@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-21
+
 - Added `ReadinessStream`, a pollable non-blocking partial-I/O trait shared by
   `TCPStream` and `UnixStream` without changing the blocking `IOStream` API.
 - Added Unix partial writes and trait-generic TCP and Unix differential checks
