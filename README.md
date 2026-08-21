@@ -17,9 +17,11 @@ standard library has no socket API yet.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
   Linux abstract namespace, convertible to `TCPStream` for reuse in APIs
   written against it.
-- Non-blocking mode (`set_nonblocking`, typed would-block error,
-  `write_some`, non-blocking connect) and a `Poller` over kqueue/epoll:
-  everything a single-threaded event loop needs.
+- `ReadinessStream`: a narrow trait for pollable descriptors, non-blocking
+  mode, single-operation reads, and partial writes. `TCPStream` and
+  `UnixStream` conform without widening the blocking `IOStream` contract.
+- `Poller` over kqueue/epoll, plus typed would-block errors and non-blocking
+  connect completion for single-threaded event loops.
 - `SocketAddress`: IPv4 + IPv6 with the platform `sockaddr` layouts
   (BSD `sin_len` vs Linux `sa_family`) handled internally.
 - `resolve()`: `getaddrinfo` with the macOS/Linux `addrinfo` field-order
@@ -46,7 +48,8 @@ Correctness is established differentially against **CPython's socket
 module** (the OS truth for TCP/UDP semantics): echo servers and clients on
 both sides, IPv6, UDP, and `getaddrinfo` agreement. The current results
 live in [COMPLIANCE.md](COMPLIANCE.md); CI regenerates the report on every
-push.
+push. The readiness trait is exercised generically over TCP and Unix sockets
+with 8 MiB partial-I/O exchanges against CPython peers.
 
 ```sh
 pixi run test          # unit tests (incl. error paths, timeouts, SIGPIPE)

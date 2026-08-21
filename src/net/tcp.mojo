@@ -24,7 +24,7 @@ from std.sys import CompilationTarget
 from .address import IPv4Address
 from .resolver import resolve
 from .sockaddr import SOCKADDR_STORAGE_LEN, SocketAddress
-from .stream import IOStream
+from .stream import ReadinessStream
 from .libc import (
     AF_INET,
     F_GETFL,
@@ -74,7 +74,7 @@ def _new_tcp_socket(family: Int = AF_INET) raises -> c_int:
     return fd
 
 
-struct TCPStream(IOStream):
+struct TCPStream(ReadinessStream):
     """A connected, blocking TCP stream.
 
     Obtained from `connect()`/`connect_addr()` on the client side or
@@ -109,6 +109,14 @@ struct TCPStream(IOStream):
         if self.nonblocking and is_timeout_error(err):
             return Error(WOULD_BLOCK_ERROR)
         return err
+
+    def descriptor(self) -> c_int:
+        """Returns the connected socket descriptor for `Poller`.
+
+        Returns:
+            The owned socket descriptor.
+        """
+        return self.fd
 
     @staticmethod
     def connect(host: StringSpan, port: UInt16) raises -> TCPStream:

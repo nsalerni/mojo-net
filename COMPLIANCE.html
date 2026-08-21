@@ -62,10 +62,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">mojo-net &middot; differential compliance run</p>
 <h1>Sockets checked against CPython, the operating-system truth</h1>
-<div class="verdict"><span class="score">9/9</span><span>checks passed</span><span class="when">2026-08-20 20:15 UTC</span></div>
+<div class="verdict"><span class="score">11/11</span><span>checks passed</span><span class="when">2026-08-21 07:02 UTC</span></div>
 <p class="thesis">No self-grading: every TCP, UDP, IPv6, and DNS behavior is exercised against CPython&rsquo;s socket module talking to the same kernel &mdash; echo both directions, half-close semantics, datagram round trips, and <code>getaddrinfo</code> agreement.</p>
 <ul class="scorecard">
-<li>net <span class="n">9/9</span></li>
+<li>net <span class="n">11/11</span></li>
 </ul></header>
 <section>
 <h2><span class="pkg">net</span> <span class="vs">vs</span> CPython sockets</h2>
@@ -81,11 +81,13 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>mojo unix-socket client 1MiB roundtrip vs CPython server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>one Poller event loop echoes to 20 concurrent CPython clients</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Poller readiness sequence matches CPython selectors</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ReadinessStream TCP partial I/O matches CPython sockets</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ReadinessStream Unix partial I/O matches CPython AF_UNIX</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section><h2>Environment</h2>
 <div class="tablewrap"><table class="envtable">
 <tr><td>mojo</td><td>Mojo 1.0.0 (ed45d567)</td></tr>
-<tr><td>python (reference: CPython sockets)</td><td>3.14.6</td></tr>
+<tr><td>python (reference: CPython sockets)</td><td>3.14.7</td></tr>
 <tr><td>platform</td><td>Darwin 27.0.0 arm64</td></tr>
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>

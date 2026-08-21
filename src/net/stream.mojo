@@ -16,6 +16,8 @@ stream. The surface is deliberately the small set those layers actually
 use, not everything a socket can do.
 """
 
+from std.ffi import c_int
+
 
 trait IOStream(Deinitable, Movable):
     """A connected, reliable, ordered byte stream.
@@ -79,4 +81,64 @@ trait IOStream(Deinitable, Movable):
 
     def close(mut self):
         """Closes the stream; safe to call more than once."""
+        ...
+
+
+trait ReadinessStream(IOStream):
+    """A connected stream that can be driven by descriptor readiness.
+
+    Implementations expose a pollable descriptor and single-operation read
+    and write methods. After `set_nonblocking(True)`, an operation that cannot
+    make progress raises `WOULD_BLOCK_ERROR`; callers retry only after their
+    `Poller` reports the corresponding readiness.
+    """
+
+    def descriptor(self) -> c_int:
+        """Returns the descriptor to register with `Poller`.
+
+        Returns:
+            The owned connected-socket descriptor.
+        """
+        ...
+
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches between blocking and non-blocking operation.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking mode.
+
+        Raises:
+            If the descriptor flags cannot be read or updated.
+        """
+        ...
+
+    def read(self, mut buf: List[Byte]) raises -> Int:
+        """Performs one read into a pre-sized buffer.
+
+        Args:
+            buf: Buffer sized to the maximum bytes to accept; shrunk to the
+                bytes actually read.
+
+        Returns:
+            Bytes read, or zero on orderly EOF.
+
+        Raises:
+            `WOULD_BLOCK_ERROR` in non-blocking mode when no bytes are ready,
+            or another socket error.
+        """
+        ...
+
+    def write_some(self, data: Span[Byte, _]) raises -> Int:
+        """Performs one write and reports accepted bytes.
+
+        Args:
+            data: Bytes to offer to the socket.
+
+        Returns:
+            Bytes accepted, or zero when data is empty.
+
+        Raises:
+            `WOULD_BLOCK_ERROR` in non-blocking mode when no bytes fit, or
+            another socket error.
+        """
         ...

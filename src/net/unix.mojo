@@ -41,7 +41,7 @@ from .libc import (
     os_error,
 )
 from .sockaddr import SOCKADDR_STORAGE_LEN
-from .stream import IOStream
+from .stream import ReadinessStream
 from .tcp import TCPStream, _new_tcp_socket
 
 comptime _SOCKADDR_UN_LEN = 110
@@ -103,7 +103,7 @@ def _pack_sockaddr_un(
 
 
 @fieldwise_init
-struct UnixStream(IOStream):
+struct UnixStream(ReadinessStream):
     """A connected Unix domain stream socket.
 
     Obtained from `connect()` or `UnixListener.accept()`. I/O behaves
@@ -113,6 +113,14 @@ struct UnixStream(IOStream):
 
     var stream: TCPStream
     """The underlying fd stream; Unix and TCP fds share their I/O paths."""
+
+    def descriptor(self) -> c_int:
+        """Returns the connected socket descriptor for `Poller`.
+
+        Returns:
+            The owned Unix socket descriptor.
+        """
+        return self.stream.descriptor()
 
     @staticmethod
     def connect(path: StringSpan) raises -> UnixStream:
@@ -176,6 +184,20 @@ struct UnixStream(IOStream):
             On socket errors, including the typed timeout error.
         """
         self.stream.write_all(data)
+
+    def write_some(self, data: Span[Byte, _]) raises -> Int:
+        """Performs one partial write; see `TCPStream.write_some`.
+
+        Args:
+            data: Bytes to offer to the socket.
+
+        Returns:
+            The number of bytes accepted, or zero for empty input.
+
+        Raises:
+            The typed would-block error or another socket error.
+        """
+        return self.stream.write_some(data)
 
     def set_read_timeout(self, nanos: Int64) raises:
         """Bounds blocking reads; see `TCPStream.set_read_timeout`.
