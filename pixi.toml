@@ -1,8 +1,7 @@
-# mojo-net — blocking TCP/UDP sockets, DNS, IPv4/IPv6 for Mojo 1.0.
+# mojo-net: blocking TCP/UDP sockets, DNS, IPv4/IPv6 for Mojo 1.0.
 #
-# Inside the grpc-mojo monorepo this manifest is a self-contained dev
-# workspace; at publish time the [package] section below is finalized for
-# the pixi-build-mojo backend (see ../../docs/PACKAGING.md).
+# Inside the grpc-mojo monorepo this manifest is a self-contained development
+# workspace. The conda package is defined in recipe/recipe.yaml.
 
 [workspace]
 channels = ["https://conda.modular.com/max", "conda-forge"]
@@ -28,14 +27,4 @@ name = "mojo-net"
 version = "0.1.0"
 
 [package.build]
-backend = { name = "pixi-build-mojo", version = "0.*" }
-
-[package.build-dependencies]
-mojo-compiler = ">=1.0.0,<1.1.0"
-
-[package.run-dependencies]
-mojo-compiler = ">=1.0.0,<1.1.0"
-
-[package.build.config.pkg]
-name = "net"
-path = "src/net"
+backend = { name = "pixi-build-rattler-build", version = "0.*" }
