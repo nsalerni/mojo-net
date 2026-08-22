@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-08-22
+
+- Added `TCPListener.descriptor()` and `set_nonblocking()` so servers can
+  drain pending connections through `Poller` without changing the blocking
+  default.
+- Extended the CPython differential to release 20 clients together and verify
+  that the listener drains the accept queue to a typed would-block result.
+
 ## 0.2.1 - 2026-08-21
 
 - Added `ReadinessStream`, a pollable non-blocking partial-I/O trait shared by
