@@ -30,9 +30,9 @@ work happens in the grpc-mojo repo.
 
 TLS is big enough to be its own repo (`mojo-tls`), following the same
 layout as this one: stdlib plus mojo-net deps only, its own tests,
-benchmarks, compliance runner, and published report. The design, informed by
-how flare solved the same problem: a thin C wrapper over libssl (from the
-conda-forge `openssl` package), compiled at build time and loaded from
+benchmarks, compliance runner, and published report. The design keeps the
+Mojo-facing surface small and auditable: a thin C wrapper over libssl (from
+the conda-forge `openssl` package), compiled at build time and loaded from
 Mojo. The wrapper exists because OpenSSL's server-side ALPN selection
 works through a C callback, which Mojo cannot provide directly; a small
 shim hosts that callback (selecting from a configured protocol list) and
