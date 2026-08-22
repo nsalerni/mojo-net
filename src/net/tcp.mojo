@@ -8,14 +8,14 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Blocking TCP streams and listeners over the libc bindings.
+"""TCP streams and listeners over the libc bindings.
 
 `TCPListener` accepts connections; `TCPStream` is one connected socket.
-All I/O is blocking; bound the wait with `set_read_timeout` /
+Both are blocking by default and can be switched to non-blocking mode for
+use with `Poller`. Bound blocking stream waits with `set_read_timeout` /
 `set_write_timeout`, which surface expiry as the typed `TIMEOUT_ERROR`
 (check with `is_timeout_error()`). SIGPIPE on writes to a closed peer is
-suppressed on both platforms (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on
-Linux).
+suppressed on both platforms (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on Linux).
 """
 
 from std.ffi import c_int, get_errno
@@ -464,6 +464,8 @@ struct TCPListener(Movable):
     """The bound port, recovered via getsockname (useful with port 0)."""
     var closed: Bool
     """True once the descriptor has been closed via `close()`."""
+    var nonblocking: Bool
+    """True while the listening descriptor is in non-blocking mode."""
 
     def __init__(out self, host: StringSpan, port: UInt16) raises:
         """Binds and listens on a numeric IPv4/IPv6 literal and port.
@@ -481,6 +483,7 @@ struct TCPListener(Movable):
         var addr = SocketAddress.parse(host, port)
         self.fd = _new_tcp_socket(addr.family())
         self.closed = False
+        self.nonblocking = False
         _ = c_setsockopt_int(self.fd, sol_socket(), so_reuseaddr(), 1)
         var packed = addr.to_sockaddr()
         if c_bind(self.fd, packed[0].unsafe_ptr(), packed[1]) != 0:
@@ -500,8 +503,44 @@ struct TCPListener(Movable):
         var span = Span(out_sa)[0 : Int(out_len)]
         self.local_port = SocketAddress.from_sockaddr(span).port
 
+    def descriptor(self) -> c_int:
+        """Returns the listening socket descriptor for `Poller`.
+
+        Returns:
+            The owned listening socket descriptor.
+        """
+        return self.fd
+
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches the listener between blocking and non-blocking mode.
+
+        In non-blocking mode, `accept()` raises the typed
+        `WOULD_BLOCK_ERROR` when the pending connection queue is empty.
+        Wait for readable readiness with `Poller` before trying again.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking.
+
+        Raises:
+            If the fcntl calls fail.
+        """
+        var flags = c_fcntl(self.fd, F_GETFL, 0)
+        if flags < 0:
+            raise os_error("fcntl(F_GETFL)")
+        var updated: c_int
+        if enabled:
+            updated = flags | o_nonblock()
+        else:
+            updated = flags & ~o_nonblock()
+        if c_fcntl(self.fd, F_SETFL, Int(updated)) < 0:
+            raise os_error("fcntl(F_SETFL)")
+        self.nonblocking = enabled
+
     def accept(self) raises -> TCPStream:
-        """Blocks until a client connects, then returns its stream.
+        """Accepts one pending connection and returns its stream.
+
+        Blocks by default. In non-blocking mode, an empty pending queue
+        raises the typed `WOULD_BLOCK_ERROR`.
 
         Returns:
             The accepted connection as a `TCPStream`.
@@ -513,7 +552,10 @@ struct TCPListener(Movable):
         var sa_len = c_int(SOCKADDR_STORAGE_LEN)
         var fd = c_accept(self.fd, sa.unsafe_ptr(), Pointer(to=sa_len))
         if fd < 0:
-            raise os_error("accept")
+            var err = os_error("accept")
+            if self.nonblocking and is_timeout_error(err):
+                raise Error(WOULD_BLOCK_ERROR)
+            raise err
         return TCPStream(fd)
 
     def close(mut self):
