@@ -31,16 +31,16 @@ Supported platforms: macOS (arm64) and Linux (x86-64, arm64).
 
 ## Example
 
-```mojo
-from net import TCPListener, TCPStream
+[`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo) runs a TCP
+echo exchange over non-blocking sockets and one `Poller`. It binds only to
+loopback and asks the operating system to choose an unused port.
 
-def main() raises:
-    var listener = TCPListener("127.0.0.1", 0)  # port 0 = pick a free port
-    var client = TCPStream.connect("127.0.0.1", listener.local_port)
-    var server_side = listener.accept()
-    client.write_all("hello".as_bytes())
-    var data = server_side.read_exact(5)
+```sh
+pixi run example
 ```
+
+The example runs in CI on macOS and Linux, so the documented program stays
+in sync with the public API.
 
 ## Verification
 
