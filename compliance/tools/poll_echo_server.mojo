@@ -25,26 +25,37 @@ struct Conn(Movable):
 def main() raises:
     var target = Int(argv()[1])
     var listener = TCPListener("127.0.0.1", 0)
+    listener.set_nonblocking(True)
     print("PORT ", listener.local_port, sep="")
 
     var poller = Poller()
-    poller.register(listener.fd, readable=True, writable=False)
+    poller.register(listener.descriptor(), readable=True, writable=False)
 
     var conns = Dict[Int, Conn]()
     var served = 0
+    var accept_drains = 0
     while served < target:
         var events = poller.wait(10_000)
         if len(events) == 0:
             raise Error("event loop stalled")
         for ev in events:
             var fd = Int(ev.fd)
-            if fd == Int(listener.fd):
-                # Level-triggered: one accept per wakeup is enough.
-                var accepted = listener.accept()
-                accepted.set_nonblocking(True)
-                var cfd = Int(accepted.fd)
-                poller.register(accepted.fd, readable=True, writable=False)
-                conns[cfd] = Conn(accepted^)
+            if fd == Int(listener.descriptor()):
+                # Drain the pending queue so one burst costs one wakeup.
+                while True:
+                    try:
+                        var accepted = listener.accept()
+                        accepted.set_nonblocking(True)
+                        var cfd = Int(accepted.fd)
+                        poller.register(
+                            accepted.fd, readable=True, writable=False
+                        )
+                        conns[cfd] = Conn(accepted^)
+                    except e:
+                        if not is_would_block(e):
+                            raise e
+                        accept_drains += 1
+                        break
                 continue
             if fd not in conns:
                 continue
@@ -92,5 +103,6 @@ def main() raises:
                 )
                 conns[fd] = conn^
     print("SERVED ", served, sep="")
+    print("ACCEPT_DRAINS ", accept_drains, sep="")
     listener.close()
     poller.close()

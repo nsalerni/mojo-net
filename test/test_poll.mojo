@@ -92,6 +92,44 @@ def test_accept_and_read_readiness() raises:
     poller.close()
 
 
+def test_nonblocking_accept_drains_burst() raises:
+    var poller = Poller()
+    var listener = TCPListener("127.0.0.1", 0)
+    assert_equal(
+        Int(listener.descriptor()), Int(listener.fd), "listener descriptor"
+    )
+    assert_true(not listener.nonblocking, "listeners are blocking by default")
+    listener.set_nonblocking(True)
+    assert_true(listener.nonblocking, "listener entered non-blocking mode")
+    poller.register(listener.descriptor(), readable=True, writable=False)
+
+    var client_count = 8
+    var clients = List[TCPStream]()
+    for _ in range(client_count):
+        clients.append(TCPStream.connect("127.0.0.1", listener.local_port))
+
+    var got = flags_for(poller.wait(2000), Int(listener.descriptor()))
+    assert_true(got[0], "listener readable for a connection burst")
+
+    var accepted = List[TCPStream]()
+    while True:
+        try:
+            accepted.append(listener.accept())
+        except e:
+            assert_true(is_would_block(e), "drained accept queue: " + String(e))
+            break
+    assert_equal(len(accepted), client_count, "all burst connections accepted")
+
+    listener.set_nonblocking(False)
+    assert_true(not listener.nonblocking, "listener restored blocking mode")
+    for i in range(len(clients)):
+        clients[i].close()
+    for i in range(len(accepted)):
+        accepted[i].close()
+    listener.close()
+    poller.close()
+
+
 def test_writable_and_interest_changes() raises:
     var poller = Poller()
     var listener = TCPListener("127.0.0.1", 0)
@@ -217,6 +255,7 @@ def test_nonblocking_connect_refused() raises:
 def main() raises:
     test_would_block_read()
     test_accept_and_read_readiness()
+    test_nonblocking_accept_drains_burst()
     test_writable_and_interest_changes()
     test_would_block_write_and_recovery()
     test_nonblocking_connect_success()

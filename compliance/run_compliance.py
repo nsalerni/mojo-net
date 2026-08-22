@@ -235,8 +235,10 @@ def section_net():
                             stdout=subprocess.PIPE, text=True, cwd=ROOT)
     pport = int(proc.stdout.readline().strip().removeprefix("PORT "))
     failures = []
+    start = threading.Barrier(clients)
     def one_client(idx: int):
         try:
+            start.wait(timeout=10)
             cs = socket.create_connection(("127.0.0.1", pport), timeout=10)
             cs.settimeout(30)
             payload = bytes((i + idx) % 256 for i in range(per_client))
@@ -265,8 +267,10 @@ def section_net():
         served_line = proc.stdout.read().strip()
     except Exception:
         proc.kill()
-    record("net", f"one Poller event loop echoes to {clients} concurrent CPython clients",
-           not failures and f"SERVED {clients}" in served_line,
+    record("net", f"one Poller event loop drains and echoes a burst of {clients} CPython clients",
+           (not failures and f"SERVED {clients}" in served_line
+            and "ACCEPT_DRAINS " in served_line
+            and "ACCEPT_DRAINS 0" not in served_line),
            "; ".join(failures[:3]) + f" [{served_line!r}]")
 
     # Readiness semantics agree with CPython's selectors module: run one
