@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accepted TCP streams now inherit the listener's logical blocking mode on
+  macOS and Linux.
 - Added local and peer endpoint inspection for connected TCP and Unix domain
   streams, including IPv4 and IPv6 ports plus Linux abstract names.
 

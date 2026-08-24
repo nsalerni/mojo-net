@@ -22,7 +22,9 @@ a `ReadinessStream` trait shared by TCP and Unix sockets, plus a `Poller` over
 kqueue (macOS) and epoll (Linux). Verified by a readiness
 sequence diffed line-for-line against CPython's `selectors` module and by
 a single-threaded Poller event loop echoing to twenty concurrent CPython
-clients, both now standing compliance checks. The gRPC server built on
+clients. Accepted stream mode is normalized across macOS and Linux and
+checked against CPython's explicit blocking modes. These are standing
+compliance checks. The gRPC server built on
 this package can now drop its one-connection-at-a-time limitation; that
 work happens in the grpc-mojo repo.
 

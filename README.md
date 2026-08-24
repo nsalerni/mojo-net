@@ -23,7 +23,8 @@ standard library has no socket API yet.
   mode, single-operation reads, and partial writes. `TCPStream` and
   `UnixStream` conform without widening the blocking `IOStream` contract.
 - `Poller` over kqueue/epoll, plus typed would-block errors and non-blocking
-  connect completion for single-threaded event loops.
+  connect completion for single-threaded event loops. Accepted TCP streams
+  inherit their listener's blocking mode on both supported operating systems.
 - `SocketAddress`: IPv4 + IPv6 with the platform `sockaddr` layouts
   (BSD `sin_len` vs Linux `sa_family`) handled internally.
 - `resolve()`: `getaddrinfo` with the macOS/Linux `addrinfo` field-order
