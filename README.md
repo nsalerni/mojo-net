@@ -32,18 +32,21 @@ standard library has no socket API yet.
 
 Supported platforms: macOS (arm64) and Linux (x86-64, arm64).
 
-## Example
+## Examples
 
-[`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo) runs a TCP
-echo exchange over non-blocking sockets and one `Poller`. It binds only to
-loopback and asks the operating system to choose an unused port.
+Start with [`examples/tcp_blocking_echo.mojo`](examples/tcp_blocking_echo.mojo).
+It opens a listener on loopback, exchanges one message, and shows how
+`shutdown_write()` sends EOF before either side closes its socket.
 
 ```sh
 pixi run example
 ```
 
-The example runs in CI on macOS and Linux, so the documented program stays
-in sync with the public API.
+That command also runs
+[`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo), which makes
+the same exchange over non-blocking sockets with one `Poller`. Both examples
+ask the operating system to choose an unused port. CI runs them on macOS and
+Linux so the code stays in sync with the public API.
 
 Connected streams report the addresses selected by the kernel:
 
