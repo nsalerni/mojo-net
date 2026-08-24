@@ -64,8 +64,10 @@ carries that project's gRPC traffic. Standalone by design — it depends only
 on the Mojo standard library, and is the working prototype for a future
 `std.net` proposal to upstream into Mojo itself.
 
-Not here yet: TLS, planned as a sibling package. The sequence and the
-verification it needs is in [ROADMAP.md](ROADMAP.md).
+TLS is available in the sibling
+[mojo-tls](https://github.com/nsalerni/mojo-tls) package. Its `TLSStream`
+wraps a connected `TCPStream` with certificate verification, SNI, and ALPN.
+mojo-net remains the socket and readiness layer beneath it.
 
 ## License
 
