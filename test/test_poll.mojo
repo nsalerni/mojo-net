@@ -12,6 +12,7 @@ from net import (
     TCPStream,
     is_would_block,
 )
+from net.libc import F_GETFL, c_fcntl, o_nonblock
 
 
 def flags_for(
@@ -128,6 +129,54 @@ def test_nonblocking_accept_drains_burst() raises:
         accepted[i].close()
     listener.close()
     poller.close()
+
+
+def test_accepted_stream_inherits_listener_mode() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+
+    var blocking_client = TCPStream.connect(
+        "127.0.0.1", listener.local_port
+    )
+    var blocking_child = listener.accept()
+    var flags = c_fcntl(blocking_child.fd, F_GETFL, 0)
+    assert_true(flags >= 0, "read blocking child flags")
+    assert_true(not blocking_child.nonblocking, "blocking wrapper state")
+    assert_equal(Int(flags & o_nonblock()), 0, "blocking descriptor flags")
+
+    listener.set_nonblocking(True)
+    var accept_poller = Poller()
+    accept_poller.register(
+        listener.descriptor(), readable=True, writable=False
+    )
+    var nonblocking_client = TCPStream.connect(
+        "127.0.0.1", listener.local_port
+    )
+    var ready = flags_for(
+        accept_poller.wait(2000), Int(listener.descriptor())
+    )
+    assert_true(ready[0], "non-blocking listener became readable")
+    var nonblocking_child = listener.accept()
+    flags = c_fcntl(nonblocking_child.fd, F_GETFL, 0)
+    assert_true(flags >= 0, "read non-blocking child flags")
+    assert_true(nonblocking_child.nonblocking, "non-blocking wrapper state")
+    assert_true(
+        (flags & o_nonblock()) != 0, "non-blocking descriptor flags"
+    )
+
+    var blocked = False
+    try:
+        _ = nonblocking_child.read_exact(1)
+    except e:
+        blocked = True
+        assert_true(is_would_block(e), "empty accepted stream: " + String(e))
+    assert_true(blocked, "empty accepted stream must not block")
+
+    blocking_client.close()
+    blocking_child.close()
+    nonblocking_client.close()
+    nonblocking_child.close()
+    accept_poller.close()
+    listener.close()
 
 
 def test_writable_and_interest_changes() raises:
@@ -256,6 +305,7 @@ def main() raises:
     test_would_block_read()
     test_accept_and_read_readiness()
     test_nonblocking_accept_drains_burst()
+    test_accepted_stream_inherits_listener_mode()
     test_writable_and_interest_changes()
     test_would_block_write_and_recovery()
     test_nonblocking_connect_success()

@@ -77,11 +77,12 @@ def _new_tcp_socket(family: Int = AF_INET) raises -> c_int:
 
 
 struct TCPStream(ReadinessStream):
-    """A connected, blocking TCP stream.
+    """A connected TCP stream.
 
     Obtained from `connect()`/`connect_addr()` on the client side or
-    `TCPListener.accept()` on the server side. Closes its file
-    descriptor on destruction; call `close()` to release it earlier.
+    `TCPListener.accept()` on the server side. New outbound streams are
+    blocking. Accepted streams inherit their listener's mode. Closes its
+    file descriptor on destruction; call `close()` to release it earlier.
     """
 
     var fd: c_int
@@ -584,13 +585,14 @@ struct TCPListener(Movable):
         """Accepts one pending connection and returns its stream.
 
         Blocks by default. In non-blocking mode, an empty pending queue
-        raises the typed `WOULD_BLOCK_ERROR`.
+        raises the typed `WOULD_BLOCK_ERROR`. The accepted stream inherits
+        the listener's logical blocking mode on every supported platform.
 
         Returns:
             The accepted connection as a `TCPStream`.
 
         Raises:
-            If the accept call fails.
+            If the accept call or descriptor mode update fails.
         """
         var sa = Array[UInt8, SOCKADDR_STORAGE_LEN](fill=0)
         var sa_len = c_int(SOCKADDR_STORAGE_LEN)
@@ -600,7 +602,16 @@ struct TCPListener(Movable):
             if self.nonblocking and is_timeout_error(err):
                 raise Error(WOULD_BLOCK_ERROR)
             raise err
-        return TCPStream(fd)
+        var stream = TCPStream(fd)
+        try:
+            # BSD kernels inherit O_NONBLOCK across accept while Linux does
+            # not. Apply the public listener mode explicitly so the wrapper
+            # state and descriptor flags agree on both platforms.
+            stream.set_nonblocking(self.nonblocking)
+        except e:
+            stream.close()
+            raise e
+        return stream^
 
     def close(mut self):
         """Closes the listening socket; safe to call more than once."""

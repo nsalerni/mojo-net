@@ -46,6 +46,7 @@ EXPECTED_NET_CHECKS = (
     "TCP IPv4 local and peer addresses match CPython socket names",
     "TCP IPv6 local and peer addresses match CPython socket names",
     "Unix local and peer paths match CPython socket names",
+    "accepted TCP streams match explicit CPython blocking modes",
 )
 
 RESULTS: dict[str, list[tuple[str, bool, str]]] = {}
@@ -458,6 +459,108 @@ def unix_name_differential() -> tuple[bool, str]:
     return all(results), "; ".join(details)
 
 
+def python_accept_mode_reference(nonblocking: bool) -> dict[str, object]:
+    """Runs the accepted-stream scenario with explicit CPython modes."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = None
+    accepted = None
+    selector = selectors.DefaultSelector()
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.setblocking(not nonblocking)
+        client = socket.create_connection(listener.getsockname(), timeout=10)
+        if nonblocking:
+            selector.register(listener, selectors.EVENT_READ)
+            if not selector.select(timeout=5):
+                raise TimeoutError("CPython listener readiness timed out")
+        accepted, _ = listener.accept()
+        accepted.setblocking(not nonblocking)
+        wrapper_mode = (
+            "NONBLOCKING" if not accepted.getblocking() else "BLOCKING"
+        )
+        raw_mode = (
+            "NONBLOCKING" if not os.get_blocking(accepted.fileno())
+            else "BLOCKING"
+        )
+        empty_result = "SKIPPED"
+        if nonblocking:
+            try:
+                accepted.recv(1)
+                empty_result = "NO_ERROR"
+            except BlockingIOError:
+                empty_result = "WOULD_BLOCK"
+            selector.unregister(listener)
+            selector.register(accepted, selectors.EVENT_READ)
+        client.sendall(b"mode")
+        data = bytearray()
+        while len(data) < 4:
+            if nonblocking and not selector.select(timeout=5):
+                raise TimeoutError("CPython accepted read timed out")
+            chunk = accepted.recv(4 - len(data))
+            if not chunk:
+                raise ConnectionError("CPython accepted stream closed early")
+            data.extend(chunk)
+        return {
+            "child": (wrapper_mode, raw_mode),
+            "empty": empty_result,
+            "data": data.decode("ascii"),
+        }
+    finally:
+        selector.close()
+        if accepted is not None:
+            accepted.close()
+        if client is not None:
+            client.close()
+        listener.close()
+
+
+def mojo_accept_mode_result(nonblocking: bool) -> dict[str, object]:
+    """Runs the accepted-stream scenario with a CPython client peer."""
+    process = None
+    client = None
+    mode = "nonblocking" if nonblocking else "blocking"
+    try:
+        process = subprocess.Popen(
+            [str(BUILD / "accept_mode_probe"), mode],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+        )
+        port_fields = read_probe_line(process).split()
+        if len(port_fields) != 2 or port_fields[0] != "PORT":
+            raise ValueError("probe returned a malformed port line")
+        port = int(port_fields[1])
+        if not 0 < port <= 65535:
+            raise ValueError("probe returned an invalid TCP port")
+        client = socket.create_connection(("127.0.0.1", port), timeout=10)
+        state_fields = read_probe_line(process).split()
+        if len(state_fields) != 4 or state_fields[0] != "STATE":
+            raise ValueError("probe returned a malformed state line")
+        state = state_fields[1:]
+        client.sendall(b"mode")
+        output, error = finish_probe(process)
+        output_lines = output.splitlines()
+        if len(output_lines) != 1 or not output_lines[0].startswith("DATA "):
+            raise ValueError("probe returned malformed data output")
+        data = output_lines[0].removeprefix("DATA ")
+        return {
+            "child": tuple(state[:2]),
+            "empty": state[2] if len(state) == 3 else None,
+            "state_fields": len(state),
+            "data": data,
+            "rc": process.returncode,
+            "error": error[:150],
+        }
+    except Exception as error:
+        return {"error": repr(error)}
+    finally:
+        if client is not None:
+            client.close()
+        stop_probe(process)
+
+
 # ------------------------------------------------------------------ net ---
 
 def section_net():
@@ -849,6 +952,42 @@ def section_net():
         detail,
     )
 
+    accept_mode_results = []
+    accept_mode_details = []
+    for nonblocking in (False, True):
+        label = "nonblocking" if nonblocking else "blocking"
+        try:
+            reference = python_accept_mode_reference(nonblocking)
+            mojo = mojo_accept_mode_result(nonblocking)
+            expected = {
+                "child": reference["child"],
+                "empty": reference["empty"],
+                "data": reference["data"],
+            }
+            observed = {
+                "child": mojo.get("child"),
+                "empty": mojo.get("empty"),
+                "data": mojo.get("data"),
+            }
+            ok = (
+                mojo.get("rc") == 0
+                and mojo.get("state_fields") == 3
+                and not mojo.get("error")
+                and observed == expected
+            )
+            detail = f"python={expected} mojo={mojo}"
+        except Exception as error:
+            ok = False
+            detail = repr(error)
+        accept_mode_results.append(ok)
+        accept_mode_details.append(label + " " + detail)
+    record(
+        "net",
+        "accepted TCP streams match explicit CPython blocking modes",
+        all(accept_mode_results),
+        "; ".join(accept_mode_details),
+    )
+
 
 # --------------------------------------------------------------- report ---
 
@@ -861,17 +1000,46 @@ def versions() -> dict[str, str]:
     }
 
 
+def net_result_summary(
+    results: dict[str, list[tuple[str, bool, str]]],
+) -> tuple[int, int, bool]:
+    """Counts registered checks and rejects incomplete result sets."""
+    rows = results.get("net", [])
+    indexed: dict[str, list[bool]] = {}
+    for name, ok, _ in rows:
+        indexed.setdefault(name, []).append(ok)
+
+    passed = 0
+    for name in EXPECTED_NET_CHECKS:
+        outcomes = indexed.get(name, [])
+        if len(outcomes) == 1 and outcomes[0]:
+            passed += 1
+
+    expected = set(EXPECTED_NET_CHECKS)
+    valid = (
+        set(results) == {"net"}
+        and len(rows) == len(EXPECTED_NET_CHECKS)
+        and set(indexed) == expected
+        and all(len(indexed[name]) == 1 for name in expected)
+    )
+    return passed, len(EXPECTED_NET_CHECKS), valid
+
+
 def write_report() -> bool:
-    total = sum(len(v) for v in RESULTS.values())
-    passed = sum(1 for v in RESULTS.values() for _, ok, _ in v if ok)
+    passed, total, valid = net_result_summary(RESULTS)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    verdict = (
+        "checks passed"
+        if valid
+        else "registered checks passed; results incomplete"
+    )
     lines = [
         "# mojo-net Compliance Report",
         "",
         "<!-- GENERATED by compliance/run_compliance.py; do not edit. -->",
         "<!-- Regenerate with: pixi run compliance -->",
         "",
-        f"**Result: {passed}/{total} checks passed.** Generated {now}.",
+        f"**Result: {passed}/{total} {verdict}.** Generated {now}.",
         "",
         "Every check compares mojo-net against CPython's `socket` module,",
         "the OS truth for TCP, UDP, and DNS semantics, never against itself.",
@@ -884,9 +1052,16 @@ def write_report() -> bool:
     for k, v in versions().items():
         lines.append(f"| {k} | {v} |")
     for section, rows in RESULTS.items():
-        p = sum(1 for _, ok, _ in rows if ok)
-        lines += ["", f"## `{section}` vs CPython sockets: {p}/{len(rows)}", "",
-                  "| Check | Result |", "|---|---|"]
+        section_passed = passed if section == "net" else 0
+        section_total = total if section == "net" else len(rows)
+        lines += [
+            "",
+            f"## `{section}` vs CPython sockets: "
+            f"{section_passed}/{section_total}",
+            "",
+            "| Check | Result |",
+            "|---|---|",
+        ]
         for name, ok, detail in rows:
             status = "✅ pass" if ok else f"❌ **fail**: {detail[:160]}"
             lines.append(f"| {name} | {status} |")
@@ -902,36 +1077,19 @@ def write_report() -> bool:
     REPORT.write_text("\n".join(lines))
     print(f"\ncompliance: {passed}/{total} checks passed")
     print(f"report: {REPORT}")
-    return passed == total
+    return valid and passed == total
 
 
 def compliance_badge_payload(
     results: dict[str, list[tuple[str, bool, str]]],
 ) -> dict[str, object]:
     """Build a Shields endpoint payload from the expected CPython checks."""
-    rows = results.get("net", [])
-    indexed: dict[str, list[bool]] = {}
-    for name, ok, _ in rows:
-        indexed.setdefault(name, []).append(ok)
-
-    passed = 0
-    for name in EXPECTED_NET_CHECKS:
-        outcomes = indexed.get(name, [])
-        if len(outcomes) == 1 and outcomes[0]:
-            passed += 1
-
-    expected = set(EXPECTED_NET_CHECKS)
-    complete = (
-        set(results) == {"net"}
-        and len(rows) == len(EXPECTED_NET_CHECKS)
-        and set(indexed) == expected
-        and all(len(indexed[name]) == 1 for name in expected)
-        and passed == len(EXPECTED_NET_CHECKS)
-    )
+    passed, total, valid = net_result_summary(results)
+    complete = valid and passed == total
     return {
         "schemaVersion": 1,
         "label": "CPython socket checks",
-        "message": f"{passed}/{len(EXPECTED_NET_CHECKS)}",
+        "message": f"{passed}/{total}",
         "color": "brightgreen" if complete else "red",
     }
 
@@ -1022,7 +1180,7 @@ def esc(t: str) -> str:
 
 HTML_EYEBROW = "mojo-net &middot; differential compliance run"
 HTML_H1 = "Sockets checked against CPython, the operating-system truth"
-HTML_THESIS = ("This report records 14 finite differential checks against CPython&rsquo;s socket module and the same kernel. They cover TCP and Unix echo, EOF and half-close behavior, UDP, IPv6 loopback, readiness, connected socket names, and <code>getaddrinfo</code> for localhost.")
+HTML_THESIS = ("This report records 15 finite differential checks against CPython&rsquo;s socket module and the same kernel. They cover TCP and Unix echo, EOF and half-close behavior, UDP, IPv6 loopback, readiness, accepted stream modes, connected socket names, and <code>getaddrinfo</code> for localhost.")
 HTML_GAPS = [
     ("Language async integration", "Poller provides non-blocking readiness today. Native async and await integration depends on public Mojo language support."),
 ]
@@ -1032,25 +1190,34 @@ HTML_SECTIONS = {
 }
 
 
-def write_html_report():
-    total = sum(len(v) for v in RESULTS.values())
-    passed = sum(1 for v in RESULTS.values() for _, ok, _ in v if ok)
+def write_html_report() -> bool:
+    passed, total, valid = net_result_summary(RESULTS)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    all_ok = passed == total
+    all_ok = valid and passed == total
+    verdict = (
+        "checks passed"
+        if valid
+        else "registered checks passed; results incomplete"
+    )
     h = [HTML_HEAD, "<main>", "<header>"]
     h.append(f'<p class="eyebrow">{HTML_EYEBROW}</p>')
     h.append(f"<h1>{HTML_H1}</h1>")
     h.append(
         f'<div class="verdict"><span class="score{"" if all_ok else " failing"}">'
-        f"{passed}/{total}</span><span>checks passed</span>"
+        f"{passed}/{total}</span><span>{verdict}</span>"
         f'<span class="when">{now}</span></div>'
     )
     h.append(f'<p class="thesis">{HTML_THESIS}</p>')
     h.append('<ul class="scorecard">')
     for section, rows in RESULTS.items():
-        p = sum(1 for _, ok, _ in rows if ok)
-        cls = "" if p == len(rows) else " failing"
-        h.append(f'<li>{esc(section)} <span class="n{cls}">{p}/{len(rows)}</span></li>')
+        section_passed = passed if section == "net" else 0
+        section_total = total if section == "net" else len(rows)
+        section_ok = all_ok if section == "net" else False
+        cls = "" if section_ok else " failing"
+        h.append(
+            f'<li>{esc(section)} <span class="n{cls}">'
+            f"{section_passed}/{section_total}</span></li>"
+        )
     h.append("</ul></header>")
 
     for section, rows in RESULTS.items():
@@ -1089,6 +1256,7 @@ def write_html_report():
     h.append("</main>")
     HTML_REPORT.write_text("\n".join(h))
     print(f"report: {HTML_REPORT.relative_to(ROOT)}")
+    return all_ok
 
 
 
@@ -1099,14 +1267,14 @@ def main() -> int:
     args = ap.parse_args()
     build_tools()
     section_net()
-    ok = write_report()
-    write_html_report()
+    markdown_ok = write_report()
+    html_ok = write_html_report()
     badge_ok = write_compliance_badge()
     if args.json:
         args.json.write_text(json.dumps(
             {"sections": {s: [[n, o, d] for n, o, d in rows]
                           for s, rows in RESULTS.items()}}))
-    return 0 if ok and badge_ok else 1
+    return 0 if markdown_ok and html_ok and badge_ok else 1
 
 
 if __name__ == "__main__":
