@@ -42,11 +42,16 @@ It opens a listener on loopback, exchanges one message, and shows how
 pixi run example
 ```
 
-That command also runs
-[`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo), which makes
-the same exchange over non-blocking sockets with one `Poller`. Both examples
-ask the operating system to choose an unused port. CI runs them on macOS and
-Linux so the code stays in sync with the public API.
+The command then runs
+[`examples/udp_dns_echo.mojo`](examples/udp_dns_echo.mojo), which resolves
+`localhost`, sends one datagram between two loopback sockets, and checks the
+source addresses returned by `recv_from`. The final
+[`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo) example makes
+the TCP exchange over non-blocking sockets with one `Poller`.
+
+All three examples ask the operating system to choose unused ports. Socket
+reads and Poller waits have timeouts. CI runs them on macOS and Linux so the
+code stays in sync with the public API.
 
 Connected streams report the addresses selected by the kernel:
 
