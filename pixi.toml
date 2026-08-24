@@ -12,7 +12,7 @@ license = "Apache-2.0"
 preview = ["pixi-build"]
 
 [tasks]
-test = "python3 tools/run_tests.py"
+test = "python3 -B compliance/test_compliance_badge.py && python3 tools/run_tests.py"
 example = "mojo run -I src examples/tcp_poller_echo.mojo"
 compliance = "python3 compliance/run_compliance.py"
 bench = "mojo run -I src bench/bench_net.mojo"
