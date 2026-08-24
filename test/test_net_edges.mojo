@@ -27,7 +27,12 @@ from net import (
     is_timeout_error,
     resolve,
 )
-from net.libc import AF_INET, SOCK_DGRAM, af_inet6
+from net.libc import (
+    AF_INET,
+    SOCK_DGRAM,
+    _checked_sockaddr_len,
+    af_inet6,
+)
 
 
 def expect_raises[F: def() raises](f: F, why: StringSpan) raises -> String:
@@ -72,6 +77,23 @@ def test_v6_formatting() raises:
 
 
 # --- sockaddr byte-level coding ---
+
+
+def test_checked_sockaddr_lengths() raises:
+    assert_equal(_checked_sockaddr_len(16, 16, 28, "test"), 16)
+
+    def negative() raises:
+        _ = _checked_sockaddr_len(-1, 2, 110, "test")
+
+    def short() raises:
+        _ = _checked_sockaddr_len(15, 16, 28, "test")
+
+    def oversized() raises:
+        _ = _checked_sockaddr_len(29, 16, 28, "test")
+
+    assert_true("short socket address" in expect_raises(negative, "negative"))
+    assert_true("short socket address" in expect_raises(short, "short"))
+    assert_true("exceeded" in expect_raises(oversized, "oversized"))
 
 
 def test_sockaddr_v4_layout() raises:
@@ -124,7 +146,7 @@ def test_from_sockaddr_errors() raises:
     assert_true("short sockaddr_in6" in msg, msg)
 
     def bad_family() raises:
-        # Family byte 1 (AF_UNIX) on macOS; 1|256 on Linux — unsupported
+        # Family byte 1 (AF_UNIX) on macOS; 1|256 on Linux is unsupported
         # either way.
         var raw = List[Byte]()
         raw.resize(16, 0)
@@ -318,8 +340,8 @@ def test_zero_length_io() raises:
     var none = client.read_exact(0)
     assert_equal(len(none), 0)
 
-    # read() into a zero-sized buffer returns 0 (indistinguishable from
-    # EOF by design — callers must size the buffer before reading).
+    # read() into a zero-sized buffer returns 0. This is indistinguishable
+    # from EOF, so callers must size the buffer before reading.
     var buf = List[Byte]()
     assert_equal(client.read(buf), 0)
 
@@ -486,6 +508,7 @@ def test_sigpipe_suppressed() raises:
 
 
 def main() raises:
+    test_checked_sockaddr_lengths()
     print("... test_v4_constructor")
     test_v4_constructor()
     print("... test_eq_negative_cases")

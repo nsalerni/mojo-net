@@ -11,6 +11,7 @@ With --json PATH, also dumps {"sections": {...}} for the umbrella suite.
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import platform
@@ -18,6 +19,7 @@ import socket
 import selectors
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -41,9 +43,13 @@ EXPECTED_NET_CHECKS = (
     "Poller readiness sequence matches CPython selectors",
     "ReadinessStream TCP partial I/O matches CPython sockets",
     "ReadinessStream Unix partial I/O matches CPython AF_UNIX",
+    "TCP IPv4 local and peer addresses match CPython socket names",
+    "TCP IPv6 local and peer addresses match CPython socket names",
+    "Unix local and peer paths match CPython socket names",
 )
 
 RESULTS: dict[str, list[tuple[str, bool, str]]] = {}
+PROBE_TIMEOUT = 15
 
 
 def record(section: str, name: str, ok: bool, detail: str = ""):
@@ -68,6 +74,388 @@ def build_tools():
             check=True, cwd=ROOT,
         )
         print(f"  built {src.stem}")
+
+
+def parse_name_probe(output: str) -> dict[str, str]:
+    values = {}
+    for line in output.splitlines():
+        key, separator, value = line.partition(" ")
+        if separator:
+            values[key] = value
+    return values
+
+
+def stop_probe(proc: subprocess.Popen | None) -> None:
+    """Terminates and reaps a probe that has not exited."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        proc.wait()
+        return
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=2)
+
+
+def read_probe_line(proc: subprocess.Popen, timeout=PROBE_TIMEOUT) -> str:
+    """Reads one probe line without allowing a readiness hang."""
+    if proc.stdout is None:
+        raise RuntimeError("probe stdout is unavailable")
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        if not selector.select(timeout):
+            raise TimeoutError("probe readiness timed out")
+        line = proc.stdout.readline()
+    finally:
+        selector.close()
+    if not line:
+        raise RuntimeError("probe exited before reporting readiness")
+    return line.rstrip("\n")
+
+
+def finish_probe(
+    proc: subprocess.Popen, timeout=PROBE_TIMEOUT
+) -> tuple[str, str]:
+    """Collects a probe and always reaps it on timeout."""
+    try:
+        return proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        stop_probe(proc)
+        raise TimeoutError("probe completion timed out") from error
+
+
+def unix_name_text(value: str | bytes) -> str:
+    """Converts CPython's pathname or abstract-byte result to Mojo text."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return value
+
+
+def unix_name_length(value: str | bytes) -> int:
+    """Returns the byte length CPython reports for a Unix socket name."""
+    if isinstance(value, bytes):
+        return len(value)
+    return len(value.encode("utf-8"))
+
+
+def format_inet_name(value: tuple) -> tuple[str, int]:
+    host = ipaddress.ip_address(value[0])
+    port = value[1]
+    if host.version == 4:
+        return f"{host}:{port}", 0
+    groups = ":".join(
+        format(int(group, 16), "x")
+        for group in host.exploded.split(":")
+    )
+    scope = value[3] if len(value) > 3 else 0
+    return f"[{groups}]:{port}", scope
+
+
+def tcp_name_differential(family: int, host: str) -> tuple[bool, str]:
+    client_probe = None
+    listener = None
+    accepted = None
+    try:
+        listener = socket.socket(family, socket.SOCK_STREAM)
+        listener.settimeout(PROBE_TIMEOUT)
+        listener.bind((host, 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        client_probe = subprocess.Popen(
+            [str(BUILD / "socket_name_probe"), "tcp-client", host, str(port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+        )
+        accepted, _ = listener.accept()
+        accepted.settimeout(PROBE_TIMEOUT)
+        python_local = accepted.getsockname()
+        python_peer = accepted.getpeername()
+        accepted.sendall(b"x")
+        client_output, client_error = finish_probe(client_probe)
+        client_names = parse_name_probe(client_output)
+        expected_client_local = format_inet_name(python_peer)
+        expected_client_peer = format_inet_name(python_local)
+        client_ok = (
+            client_probe.returncode == 0
+            and client_names.get("LOCAL") == expected_client_local[0]
+            and client_names.get("LOCAL_SCOPE") == str(expected_client_local[1])
+            and client_names.get("PEER") == expected_client_peer[0]
+            and client_names.get("PEER_SCOPE") == str(expected_client_peer[1])
+        )
+    except Exception as error:
+        return False, f"client phase failed: {error!r}"
+    finally:
+        if accepted is not None:
+            accepted.close()
+        if listener is not None:
+            listener.close()
+        stop_probe(client_probe)
+
+    server_probe = None
+    python_client = None
+    try:
+        server_probe = subprocess.Popen(
+            [str(BUILD / "socket_name_probe"), "tcp-server", host],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+        )
+        server_port = int(read_probe_line(server_probe).removeprefix("PORT "))
+        python_client = socket.socket(family, socket.SOCK_STREAM)
+        python_client.settimeout(PROBE_TIMEOUT)
+        python_client.connect((host, server_port))
+        expected_server_local = format_inet_name(python_client.getpeername())
+        expected_server_peer = format_inet_name(python_client.getsockname())
+        server_output, server_error = finish_probe(server_probe)
+        server_names = parse_name_probe(server_output)
+        server_ok = (
+            server_probe.returncode == 0
+            and server_names.get("LOCAL") == expected_server_local[0]
+            and server_names.get("LOCAL_SCOPE") == str(expected_server_local[1])
+            and server_names.get("PEER") == expected_server_peer[0]
+            and server_names.get("PEER_SCOPE") == str(expected_server_peer[1])
+        )
+    except Exception as error:
+        return False, f"server phase failed: {error!r}"
+    finally:
+        if python_client is not None:
+            python_client.close()
+        stop_probe(server_probe)
+
+    return client_ok and server_ok, (
+        f"client={client_names} expected=({expected_client_local}, "
+        f"{expected_client_peer}) rc={client_probe.returncode} "
+        f"err={client_error[:100]!r}; server={server_names} "
+        f"expected=({expected_server_local}, {expected_server_peer}) "
+        f"rc={server_probe.returncode} err={server_error[:100]!r}"
+    )
+
+
+def unix_client_name_phase(
+    endpoint: str | bytes, mode: str, argument: str
+) -> tuple[bool, str]:
+    listener = None
+    accepted = None
+    probe = None
+    try:
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.settimeout(PROBE_TIMEOUT)
+        listener.bind(endpoint)
+        listener.listen(1)
+        probe = subprocess.Popen(
+            [str(BUILD / "socket_name_probe"), mode, argument],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+        )
+        accepted, _ = listener.accept()
+        accepted.settimeout(PROBE_TIMEOUT)
+        python_local = accepted.getsockname()
+        python_peer = accepted.getpeername()
+        accepted.sendall(b"x")
+        output, error = finish_probe(probe)
+        names = parse_name_probe(output)
+        ok = (
+            probe.returncode == 0
+            and names.get("LOCAL_PATH") == unix_name_text(python_peer)
+            and names.get("LOCAL_LENGTH") == str(unix_name_length(python_peer))
+            and names.get("PEER_PATH") == unix_name_text(python_local)
+            and names.get("PEER_LENGTH") == str(unix_name_length(python_local))
+        )
+        return ok, (
+            f"client={names} python=({python_peer!r}, {python_local!r}) "
+            f"rc={probe.returncode} err={error[:100]!r}"
+        )
+    except Exception as error:
+        return False, f"client phase failed: {error!r}"
+    finally:
+        if accepted is not None:
+            accepted.close()
+        if listener is not None:
+            listener.close()
+        stop_probe(probe)
+
+
+def unix_server_name_phase(
+    endpoint: str | bytes, mode: str, argument: str
+) -> tuple[bool, str]:
+    probe = None
+    python_client = None
+    try:
+        probe = subprocess.Popen(
+            [str(BUILD / "socket_name_probe"), mode, argument],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=ROOT,
+        )
+        ready = read_probe_line(probe)
+        python_client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        python_client.settimeout(PROBE_TIMEOUT)
+        python_client.connect(endpoint)
+        python_local = python_client.getpeername()
+        python_peer = python_client.getsockname()
+        output, error = finish_probe(probe)
+        names = parse_name_probe(output)
+        ok = (
+            ready == "READY"
+            and probe.returncode == 0
+            and names.get("LOCAL_PATH") == unix_name_text(python_local)
+            and names.get("LOCAL_LENGTH") == str(unix_name_length(python_local))
+            and names.get("PEER_PATH") == unix_name_text(python_peer)
+            and names.get("PEER_LENGTH") == str(unix_name_length(python_peer))
+        )
+        return ok, (
+            f"server={names} python=({python_local!r}, {python_peer!r}) "
+            f"rc={probe.returncode} err={error[:100]!r}"
+        )
+    except Exception as error:
+        return False, f"server phase failed: {error!r}"
+    finally:
+        if python_client is not None:
+            python_client.close()
+        stop_probe(probe)
+
+
+def inherited_name_probe(mode: str, sock: socket.socket) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(BUILD / "socket_name_probe"), mode, str(sock.fileno())],
+        pass_fds=(sock.fileno(),),
+        capture_output=True,
+        text=True,
+        timeout=PROBE_TIMEOUT,
+        cwd=ROOT,
+    )
+
+
+def unix_unnamed_differential() -> tuple[bool, str]:
+    left = None
+    right = None
+    try:
+        left, right = socket.socketpair()
+        result = inherited_name_probe("unix-fd", right)
+        names = parse_name_probe(result.stdout)
+        python_local = left.getsockname()
+        python_peer = left.getpeername()
+        ok = (
+            result.returncode == 0
+            and names.get("LOCAL_PATH") == unix_name_text(python_peer)
+            and names.get("LOCAL_LENGTH") == str(unix_name_length(python_peer))
+            and names.get("PEER_PATH") == unix_name_text(python_local)
+            and names.get("PEER_LENGTH") == str(unix_name_length(python_local))
+        )
+        return ok, (
+            f"socketpair={names} python=({python_peer!r}, {python_local!r}) "
+            f"rc={result.returncode} err={result.stderr[:100]!r}"
+        )
+    except Exception as error:
+        return False, f"socketpair phase failed: {error!r}"
+    finally:
+        if left is not None:
+            left.close()
+        if right is not None:
+            right.close()
+
+
+def unconnected_peer_differential(
+    family: int, mode: str
+) -> tuple[bool, str]:
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        reference_failed = False
+        reference_errno = None
+        try:
+            sock.getpeername()
+        except OSError as error:
+            reference_failed = True
+            reference_errno = error.errno
+        result = inherited_name_probe(mode, sock)
+        values = parse_name_probe(result.stdout)
+        mojo_errno = values.get("ERRNO")
+        ok = (
+            reference_failed
+            and reference_errno is not None
+            and result.returncode == 0
+            and mojo_errno == str(reference_errno)
+        )
+        return ok, (
+            f"python_errno={reference_errno} mojo_errno={mojo_errno} "
+            f"rc={result.returncode} err={result.stderr[:120]!r}"
+        )
+    except Exception as error:
+        return False, f"unconnected peer phase failed: {error!r}"
+    finally:
+        sock.close()
+
+
+def unix_name_differential() -> tuple[bool, str]:
+    results = []
+    details = []
+    with tempfile.TemporaryDirectory(
+        prefix="mojo-net-names-", dir="/tmp"
+    ) as private_dir:
+        first_path = str(Path(private_dir) / "client.sock")
+        second_path = str(Path(private_dir) / "server.sock")
+        ok, detail = unix_client_name_phase(
+            first_path, "unix-client", first_path
+        )
+        results.append(ok)
+        details.append("filesystem client " + detail)
+        ok, detail = unix_server_name_phase(
+            second_path, "unix-server", second_path
+        )
+        results.append(ok)
+        details.append("filesystem server " + detail)
+        for path in (first_path, second_path):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+        if platform.system() == "Linux":
+            suffix = "mojo-net-" + Path(private_dir).name
+            abstract_name = b"\0" + suffix.encode("utf-8")
+            ok, detail = unix_client_name_phase(
+                abstract_name, "unix-abstract-client", suffix
+            )
+            results.append(ok)
+            details.append("abstract client " + detail)
+            ok, detail = unix_server_name_phase(
+                abstract_name + b"-server",
+                "unix-abstract-server",
+                suffix + "-server",
+            )
+            results.append(ok)
+            details.append("abstract server " + detail)
+        else:
+            details.append("abstract Linux only")
+
+    ok, detail = unix_unnamed_differential()
+    results.append(ok)
+    details.append("unnamed socketpair " + detail)
+    ok, detail = unconnected_peer_differential(
+        socket.AF_UNIX, "unix-peer-fd"
+    )
+    results.append(ok)
+    details.append("unconnected Unix " + detail)
+    ok, detail = unconnected_peer_differential(
+        socket.AF_INET, "tcp-peer-fd"
+    )
+    results.append(ok)
+    details.append("unconnected TCP " + detail)
+    return all(results), "; ".join(details)
 
 
 # ------------------------------------------------------------------ net ---
@@ -437,6 +825,30 @@ def section_net():
         f"out={r.stdout.strip()!r} peer={unix_result} err={r.stderr[:120]!r}",
     )
 
+    ok, detail = tcp_name_differential(socket.AF_INET, "127.0.0.1")
+    record(
+        "net",
+        "TCP IPv4 local and peer addresses match CPython socket names",
+        ok,
+        detail,
+    )
+
+    ok, detail = tcp_name_differential(socket.AF_INET6, "::1")
+    record(
+        "net",
+        "TCP IPv6 local and peer addresses match CPython socket names",
+        ok,
+        detail,
+    )
+
+    ok, detail = unix_name_differential()
+    record(
+        "net",
+        "Unix local and peer paths match CPython socket names",
+        ok,
+        detail,
+    )
+
 
 # --------------------------------------------------------------- report ---
 
@@ -610,15 +1022,13 @@ def esc(t: str) -> str:
 
 HTML_EYEBROW = "mojo-net &middot; differential compliance run"
 HTML_H1 = "Sockets checked against CPython, the operating-system truth"
-HTML_THESIS = ("No self-grading: every TCP, UDP, IPv6, and DNS behavior is exercised against CPython&rsquo;s socket module talking to the same kernel &mdash; echo both directions, half-close semantics, datagram round trips, and <code>getaddrinfo</code> agreement.")
+HTML_THESIS = ("This report records 14 finite differential checks against CPython&rsquo;s socket module and the same kernel. They cover TCP and Unix echo, EOF and half-close behavior, UDP, IPv6 loopback, readiness, connected socket names, and <code>getaddrinfo</code> for localhost.")
 HTML_GAPS = [
-    ("TLS", "not implemented; needs a Mojo TLS binding."),
-    ("Async / non-blocking I/O", "blocking sockets only until Mojo exposes threads/async; bound waits with the typed read/write timeouts."),
-    ("Unix domain sockets", "not implemented (AF_INET/AF_INET6 only)."),
+    ("Language async integration", "Poller provides non-blocking readiness today. Native async and await integration depends on public Mojo language support."),
 ]
 HTML_SECTIONS = {
     "net": ("`net` vs CPython sockets",
-            "1 MiB echo in both directions between mojo-net TCP and CPython sockets, including half-close (shutdown) and clean-EOF semantics, UDP datagram round trips, IPv6, and getaddrinfo differential resolution."),
+            "1 MiB echo in both directions between mojo-net and CPython sockets, including TCP and Unix streams, half-close and clean EOF semantics, UDP datagram round trips, IPv6, readiness, connected socket names, and getaddrinfo differential resolution."),
 }
 
 
@@ -669,7 +1079,7 @@ def write_html_report():
 
     h.append('<section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>')
     for k, v in HTML_GAPS:
-        h.append(f"<li><strong>{esc(k)}</strong> &mdash; {esc(v)}</li>")
+        h.append(f"<li><strong>{esc(k)}.</strong> {esc(v)}</li>")
     h.append("</ul></section>")
     h.append(
         "<footer>Generated by compliance/run_compliance.py &middot; "

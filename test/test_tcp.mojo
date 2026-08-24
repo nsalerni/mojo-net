@@ -4,7 +4,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from net import IPv4Address, TCPListener, TCPStream
+from net import IPv4Address, SocketAddress, TCPListener, TCPStream
 
 
 def test_address_roundtrip() raises:
@@ -52,8 +52,64 @@ def test_loopback_echo() raises:
     listener.close()
 
 
+def check_connection_addresses(host: StringSpan, expect_v6: Bool) raises:
+    var listener = TCPListener(host, 0)
+    var client = TCPStream.connect(host, listener.local_port)
+    var server_side = listener.accept()
+
+    var client_local = client.local_address()
+    var client_peer = client.peer_address()
+    var server_local = server_side.local_address()
+    var server_peer = server_side.peer_address()
+    var listener_address = SocketAddress.parse(host, listener.local_port)
+
+    assert_equal(client_local.is_v6, expect_v6)
+    assert_equal(client_peer.is_v6, expect_v6)
+    assert_true(client_local.port != 0, "client has an ephemeral port")
+    assert_true(client_peer == listener_address, "client sees listener")
+    assert_true(server_local == listener_address, "accepted local address")
+    assert_true(server_peer == client_local, "accepted peer matches client")
+    assert_equal(client_local.scope_id, server_peer.scope_id)
+    assert_equal(client_peer.scope_id, server_local.scope_id)
+
+    client.close()
+    server_side.close()
+    listener.close()
+
+
+def test_connection_addresses() raises:
+    check_connection_addresses("127.0.0.1", False)
+    check_connection_addresses("::1", True)
+
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server_side = listener.accept()
+    var closed_fd = client.fd
+    client.close()
+    var replacement = TCPListener("127.0.0.1", 0)
+    assert_equal(
+        Int(replacement.fd), Int(closed_fd), "kernel reused the closed fd"
+    )
+    var local_failed = False
+    try:
+        _ = client.local_address()
+    except:
+        local_failed = True
+    assert_true(local_failed, "closed socket has no local address")
+    var peer_failed = False
+    try:
+        _ = client.peer_address()
+    except:
+        peer_failed = True
+    assert_true(peer_failed, "closed socket has no peer address")
+    replacement.close()
+    server_side.close()
+    listener.close()
+
+
 def main() raises:
     test_address_roundtrip()
     test_address_invalid()
     test_loopback_echo()
+    test_connection_addresses()
     print("test_tcp: all tests passed")

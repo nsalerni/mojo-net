@@ -41,6 +41,7 @@ from .libc import (
     c_bind,
     c_close,
     c_connect,
+    c_getpeername,
     c_getsockname,
     c_ioctl_fionread,
     c_listen,
@@ -51,6 +52,7 @@ from .libc import (
     c_fcntl,
     c_getsockopt_int,
     c_socket,
+    _checked_sockaddr_len,
     einprogress,
     is_timeout_error,
     msg_nosignal,
@@ -117,6 +119,48 @@ struct TCPStream(ReadinessStream):
             The owned socket descriptor.
         """
         return self.fd
+
+    def local_address(self) raises -> SocketAddress:
+        """Returns the local IP address and port for this connection.
+
+        Returns:
+            The IPv4 or IPv6 address assigned to this end of the socket.
+
+        Raises:
+            If the descriptor is closed, the kernel query fails, or the
+            descriptor does not carry an IPv4 or IPv6 address.
+        """
+        if self.closed:
+            raise Error("net: socket is closed")
+        var raw = Array[UInt8, SOCKADDR_STORAGE_LEN](fill=0)
+        var raw_len = c_int(SOCKADDR_STORAGE_LEN)
+        if c_getsockname(self.fd, raw.unsafe_ptr(), Pointer(to=raw_len)) != 0:
+            raise os_error("getsockname")
+        var length = _checked_sockaddr_len(
+            Int(raw_len), 16, SOCKADDR_STORAGE_LEN, "getsockname"
+        )
+        return SocketAddress.from_sockaddr(Span(raw)[0:length])
+
+    def peer_address(self) raises -> SocketAddress:
+        """Returns the connected peer's IP address and port.
+
+        Returns:
+            The peer's IPv4 or IPv6 socket address.
+
+        Raises:
+            If the descriptor is closed or unconnected, the kernel query
+            fails, or the peer is not an IPv4 or IPv6 address.
+        """
+        if self.closed:
+            raise Error("net: socket is closed")
+        var raw = Array[UInt8, SOCKADDR_STORAGE_LEN](fill=0)
+        var raw_len = c_int(SOCKADDR_STORAGE_LEN)
+        if c_getpeername(self.fd, raw.unsafe_ptr(), Pointer(to=raw_len)) != 0:
+            raise os_error("getpeername")
+        var length = _checked_sockaddr_len(
+            Int(raw_len), 16, SOCKADDR_STORAGE_LEN, "getpeername"
+        )
+        return SocketAddress.from_sockaddr(Span(raw)[0:length])
 
     @staticmethod
     def connect(host: StringSpan, port: UInt16) raises -> TCPStream:
