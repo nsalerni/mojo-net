@@ -1,17 +1,18 @@
-# Security Policy
+# Security policy
 
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately via
-[GitHub security advisories](https://github.com/nsalerni/grpc-mojo/security/advisories/new)
+[GitHub security advisories](https://github.com/nsalerni/mojo-net/security/advisories/new)
 rather than public issues. You should receive a response within a week.
 
 ## Scope notes
 
-grpc-mojo currently supports plaintext HTTP/2 (h2c) only — it is not yet
-suitable for exposure to untrusted networks. The HTTP/2 layer implements the
-standard abuse mitigations (rapid-reset accounting, PING/SETTINGS flood
-limits, concurrency and header-size caps, flow-control backpressure), and
-the protobuf decoder enforces the reference nesting-depth limit, but the
-project has not had an external security review. See
-[docs/ROADMAP.md](docs/ROADMAP.md) for the TLS plan.
+mojo-net provides TCP, UDP, Unix domain socket, DNS, and readiness polling
+APIs. It does not authenticate peers or encrypt TCP traffic. Applications
+that need transport security should use
+[mojo-tls](https://github.com/nsalerni/mojo-tls).
+
+Reports about descriptor lifecycle, address handling, platform socket layouts,
+or Poller event handling are in scope. The project has not had an external
+security review.
