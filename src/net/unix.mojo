@@ -36,8 +36,11 @@ from .libc import (
     c_bind,
     c_close,
     c_connect,
+    c_getpeername,
+    c_getsockname,
     c_listen,
     c_unlink,
+    _checked_sockaddr_len,
     os_error,
 )
 from .sockaddr import SOCKADDR_STORAGE_LEN
@@ -102,6 +105,33 @@ def _pack_sockaddr_un(
     return (buf^, addr_len)
 
 
+def _unpack_sockaddr_un(raw: Span[Byte, _]) raises -> String:
+    """Decodes a Unix sockaddr path, preserving Linux abstract names."""
+    if len(raw) < 2:
+        raise Error("net: short unix socket address")
+    var family: Int
+    comptime if CompilationTarget.is_macos():
+        family = Int(raw[1])
+    else:
+        family = Int(raw[0]) | (Int(raw[1]) << 8)
+    if family != AF_UNIX:
+        raise Error("net: expected unix socket address")
+    if len(raw) == 2:
+        return String("")
+
+    var end = len(raw)
+    var abstract = False
+    comptime if CompilationTarget.is_linux():
+        abstract = raw[2] == 0
+    if not abstract:
+        while end > 2 and raw[end - 1] == 0:
+            end -= 1
+    var path = List[Byte](capacity=end - 2)
+    for i in range(2, end):
+        path.append(raw[i])
+    return String(from_utf8=path)
+
+
 @fieldwise_init
 struct UnixStream(ReadinessStream):
     """A connected Unix domain stream socket.
@@ -121,6 +151,67 @@ struct UnixStream(ReadinessStream):
             The owned Unix socket descriptor.
         """
         return self.stream.descriptor()
+
+    def local_path(self) raises -> String:
+        """Returns this connection's bound Unix socket path.
+
+        An unbound endpoint, normally the connecting client, returns an
+        empty string. Linux abstract names retain their leading NUL byte.
+        The path is decoded as UTF-8 because this API returns `String`.
+        Non-UTF-8 path bytes raise an error.
+
+        Returns:
+            The local filesystem path, abstract name, or an empty string.
+
+        Raises:
+            If the descriptor is closed or the kernel query fails.
+        """
+        if self.stream.closed:
+            raise Error("net: socket is closed")
+        var raw = Array[UInt8, _SOCKADDR_UN_LEN](fill=0)
+        var raw_len = c_int(_SOCKADDR_UN_LEN)
+        if (
+            c_getsockname(
+                self.stream.fd, raw.unsafe_ptr(), Pointer(to=raw_len)
+            )
+            != 0
+        ):
+            raise os_error("getsockname")
+        var length = _checked_sockaddr_len(
+            Int(raw_len), 2, _SOCKADDR_UN_LEN, "getsockname"
+        )
+        return _unpack_sockaddr_un(Span(raw)[0:length])
+
+    def peer_path(self) raises -> String:
+        """Returns the connected peer's Unix socket path.
+
+        An unbound peer, normally the client accepted by a server, returns
+        an empty string. Linux abstract names retain their leading NUL byte.
+        The path is decoded as UTF-8 because this API returns `String`.
+        Non-UTF-8 path bytes raise an error.
+
+        Returns:
+            The peer filesystem path, abstract name, or an empty string.
+
+        Raises:
+            If the descriptor is closed or unconnected, or the kernel query
+            fails.
+        """
+        if self.stream.closed:
+            raise Error("net: socket is closed")
+        var raw = Array[UInt8, _SOCKADDR_UN_LEN](fill=0)
+        var raw_len = c_int(_SOCKADDR_UN_LEN)
+        if (
+            c_getpeername(
+                self.stream.fd, raw.unsafe_ptr(), Pointer(to=raw_len)
+            )
+            != 0
+        ):
+            raise os_error("getpeername")
+        var length = _checked_sockaddr_len(
+            Int(raw_len), 2, _SOCKADDR_UN_LEN, "getpeername"
+        )
+        return _unpack_sockaddr_un(Span(raw)[0:length])
 
     @staticmethod
     def connect(path: StringSpan) raises -> UnixStream:
@@ -278,7 +369,7 @@ struct UnixListener(Movable):
 
     Binding a path that already exists fails, matching CPython; pass
     `remove_existing=True` to unlink a stale socket file first. `close()`
-    releases the descriptor but leaves the socket file in place — remove
+    releases the descriptor but leaves the socket file in place. Remove
     it with the path's owner when the service is done.
     """
 

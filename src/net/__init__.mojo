@@ -24,10 +24,11 @@ Highlights:
 
 - `TCPListener` / `TCPStream`: blocking TCP with per-socket read/write
   timeouts (SO_RCVTIMEO / SO_SNDTIMEO). Timeouts surface as the typed
-  `TIMEOUT_ERROR`, checked with `is_timeout_error()`.
+  `TIMEOUT_ERROR`, checked with `is_timeout_error()`. Connected streams
+  expose their kernel-selected local and peer addresses.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
-  Linux abstract namespace.
+  Linux abstract namespace and connected path inspection.
 - `SocketAddress`: IPv4 and IPv6 addresses with platform `sockaddr` coding.
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
 - `Poller`: readiness polling over kqueue/epoll for non-blocking sockets

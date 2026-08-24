@@ -26,7 +26,7 @@ class ComplianceBadgeTest(unittest.TestCase):
         self.assertEqual(payload, {
             "schemaVersion": 1,
             "label": "CPython socket checks",
-            "message": "11/11",
+            "message": "14/14",
             "color": "brightgreen",
         })
         self.assertEqual(json.loads(compliance_badge_json(results)), payload)
@@ -38,7 +38,7 @@ class ComplianceBadgeTest(unittest.TestCase):
 
         payload = compliance_badge_payload(results)
 
-        self.assertEqual(payload["message"], "10/11")
+        self.assertEqual(payload["message"], "13/14")
         self.assertEqual(payload["color"], "red")
 
     def test_missing_check_cannot_produce_a_green_badge(self):
@@ -47,7 +47,7 @@ class ComplianceBadgeTest(unittest.TestCase):
 
         payload = compliance_badge_payload(results)
 
-        self.assertEqual(payload["message"], "10/11")
+        self.assertEqual(payload["message"], "13/14")
         self.assertEqual(payload["color"], "red")
 
     def test_duplicate_or_unexpected_check_is_red(self):

@@ -10,7 +10,7 @@
 
 """Socket bindings to libc for Mojo 1.0 via `std.ffi.external_call`.
 
-Mojo 1.0 has no socket API in its standard library — this module is the
+Mojo 1.0 has no socket API in its standard library. This module is the
 gap-filler and a candidate for upstreaming (see docs/PRIMITIVES.md).
 Supports macOS and Linux; constants whose values differ between the two are
 exposed as functions that select the right value at compile time. The
@@ -158,7 +158,7 @@ def o_nonblock() -> c_int:
 def so_error() -> c_int:
     """Returns the platform's SO_ERROR socket option name.
 
-    Reading it fetches and clears a socket's pending error — the way a
+    Reading it fetches and clears a socket's pending error. This is how a
     non-blocking `connect(2)` reports its outcome once the socket polls
     writable.
 
@@ -201,9 +201,9 @@ directly.
 def os_error(var context: String) -> Error:
     """Builds an `Error` from the current errno, mapping timeouts specially.
 
-    When errno is EAGAIN/EWOULDBLOCK (35 on macOS, 11 on Linux) — the value a
+    When errno is EAGAIN/EWOULDBLOCK (35 on macOS, 11 on Linux), the value a
     blocking socket call returns after an SO_RCVTIMEO/SO_SNDTIMEO timeout
-    expires — the returned error carries exactly `TIMEOUT_ERROR` so callers
+    expires, the returned error carries exactly `TIMEOUT_ERROR` so callers
     can detect it with `is_timeout_error()`. All other errno values produce
     "context: errno N".
 
@@ -475,6 +475,37 @@ def c_getsockname(
         0 on success, -1 on failure (errno is set).
     """
     return external_call["getsockname", c_int](fd, addr, addr_len)
+
+
+def c_getpeername(
+    fd: c_int, addr: MutPointer[UInt8, _], addr_len: MutPointer[c_int, _]
+) -> c_int:
+    """Calls `getpeername(2)` to read a connected socket's peer address.
+
+    Args:
+        fd: The connected socket file descriptor.
+        addr: Output buffer that receives the peer sockaddr.
+        addr_len: In: capacity of `addr`; out: actual sockaddr length.
+
+    Returns:
+        0 on success, -1 on failure (errno is set).
+    """
+    return external_call["getpeername", c_int](fd, addr, addr_len)
+
+
+def _checked_sockaddr_len(
+    length: Int, minimum: Int, capacity: Int, context: StringSpan
+) raises -> Int:
+    """Validates a sockaddr length returned by the kernel."""
+    if length < minimum:
+        raise Error(
+            "net: " + String(context) + " returned a short socket address"
+        )
+    if length > capacity:
+        raise Error(
+            "net: " + String(context) + " exceeded the address buffer"
+        )
+    return length
 
 
 def c_setsockopt_timeval(

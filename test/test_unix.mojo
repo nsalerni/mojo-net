@@ -6,7 +6,8 @@ from std.ffi import c_int, external_call
 from std.sys import CompilationTarget
 from std.testing import assert_equal, assert_true
 
-from net import UnixListener, UnixStream, is_timeout_error
+from net import TCPStream, UnixListener, UnixStream, is_timeout_error
+from net.libc import AF_UNIX, SOCK_STREAM
 
 
 def sock_path(tag: StringSpan) -> String:
@@ -48,6 +49,73 @@ def test_echo_and_eof() raises:
     server_side.close()
     listener.close()
     cleanup(path^)
+
+
+def test_connection_paths() raises:
+    var path = sock_path("names")
+    var listener = UnixListener(path, remove_existing=True)
+    var client = UnixStream.connect(path)
+    var server_side = listener.accept()
+
+    assert_equal(client.local_path(), "")
+    assert_equal(client.peer_path(), path)
+    assert_equal(server_side.local_path(), path)
+    assert_equal(server_side.peer_path(), "")
+
+    var closed_fd = client.stream.fd
+    client.close()
+    var replacement_path = sock_path("names-reuse")
+    var replacement = UnixListener(replacement_path, remove_existing=True)
+    assert_equal(
+        Int(replacement.fd), Int(closed_fd), "kernel reused the closed fd"
+    )
+    var failed = False
+    try:
+        _ = client.local_path()
+    except:
+        failed = True
+    assert_true(failed, "closed unix socket has no local path")
+    failed = False
+    try:
+        _ = client.peer_path()
+    except:
+        failed = True
+    assert_true(failed, "closed unix socket has no peer path")
+    replacement.close()
+    server_side.close()
+    listener.close()
+    cleanup(replacement_path^)
+    cleanup(path^)
+
+
+def test_unnamed_and_unconnected_paths() raises:
+    var pair = Array[c_int, 2](fill=0)
+    var rc = external_call["socketpair", c_int](
+        c_int(AF_UNIX), c_int(SOCK_STREAM), c_int(0), pair.unsafe_ptr()
+    )
+    assert_equal(Int(rc), 0, "socketpair")
+    var left = UnixStream(stream=TCPStream(pair[0]))
+    var right = UnixStream(stream=TCPStream(pair[1]))
+    assert_equal(left.local_path(), "")
+    assert_equal(left.peer_path(), "")
+    assert_equal(right.local_path(), "")
+    assert_equal(right.peer_path(), "")
+    left.close()
+    right.close()
+
+    var fd = external_call["socket", c_int](
+        c_int(AF_UNIX), c_int(SOCK_STREAM), c_int(0)
+    )
+    assert_true(fd >= 0, "unconnected unix socket")
+    var unconnected = UnixStream(stream=TCPStream(fd))
+    var failed = False
+    try:
+        _ = unconnected.peer_path()
+    except e:
+        failed = True
+        assert_true("getpeername" in String(e), String(e))
+    assert_true(failed, "unconnected unix peer lookup must fail")
+    unconnected.close()
 
 
 def test_large_transfer() raises:
@@ -188,6 +256,10 @@ def test_abstract_namespace() raises:
         var listener = UnixListener(name)
         var client = UnixStream.connect(name)
         var server_side = listener.accept()
+        assert_equal(client.local_path(), "")
+        assert_equal(client.peer_path(), name)
+        assert_equal(server_side.local_path(), name)
+        assert_equal(server_side.peer_path(), "")
         client.write_all("abstract".as_bytes())
         assert_equal(String(from_utf8=server_side.read_exact(8)), "abstract")
         client.close()
@@ -205,6 +277,8 @@ def test_abstract_namespace() raises:
 
 def main() raises:
     test_echo_and_eof()
+    test_connection_paths()
+    test_unnamed_and_unconnected_paths()
     test_large_transfer()
     test_read_timeout_is_typed()
     test_connect_failures()

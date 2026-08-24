@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added local and peer endpoint inspection for connected TCP and Unix domain
+  streams, including IPv4 and IPv6 ports plus Linux abstract names.
+
 ## 0.2.2 - 2026-08-22
 
 - Added `TCPListener.descriptor()` and `set_nonblocking()` so servers can
