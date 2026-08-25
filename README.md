@@ -47,11 +47,15 @@ The command then runs
 `localhost`, sends one datagram between two loopback sockets, and checks the
 source addresses returned by `recv_from`. The final
 [`examples/tcp_poller_echo.mojo`](examples/tcp_poller_echo.mojo) example makes
-the TCP exchange over non-blocking sockets with one `Poller`.
+the TCP exchange over non-blocking sockets with one `Poller`. The last example,
+[`examples/unix_socket_echo.mojo`](examples/unix_socket_echo.mojo), shows a
+Unix socket file, path inspection, and write-half shutdown.
 
-All three examples ask the operating system to choose unused ports. Socket
-reads and Poller waits have timeouts. CI runs them on macOS and Linux so the
-code stays in sync with the public API.
+The TCP and UDP examples ask the operating system to choose unused ports. The
+Unix example uses a process-specific path under `/tmp` and removes it before
+exit.
+Socket reads and Poller waits have timeouts. CI runs every example on macOS and
+Linux so the code stays in sync with the public API.
 
 Connected streams report the addresses selected by the kernel:
 
