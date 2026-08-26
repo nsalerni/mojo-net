@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `TCPStream.connect` and `connect_addr` accept `timeout_ns` so a connect
+  cannot hang for the kernel default. Expiry is the typed `TIMEOUT_ERROR`.
 - `UnixListener` now exposes `descriptor()` and `set_nonblocking()` so
   servers can drain pending connections through `Poller`. Accepted
   streams inherit the listener's logical blocking mode.

@@ -255,6 +255,28 @@ def test_connect_addr() raises:
     assert_true("connect" in msg, msg)
 
 
+def test_connect_timeout_is_typed() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect(
+        "127.0.0.1", listener.local_port, timeout_ns=2_000_000_000
+    )
+    var server_side = listener.accept()
+    client.write_all("ok".as_bytes())
+    assert_equal(String(from_utf8=server_side.read_exact(2)), "ok")
+    client.close()
+    server_side.close()
+    listener.close()
+
+    var raised = False
+    try:
+        # TEST-NET-1 is not routed; the bound must expire as TIMEOUT_ERROR.
+        _ = TCPStream.connect("192.0.2.1", 80, timeout_ns=200_000_000)
+    except e:
+        raised = True
+        assert_true(is_timeout_error(e), "must be the typed TIMEOUT_ERROR")
+    assert_true(raised, "unroutable connect must time out")
+
+
 def test_read_timeout_is_typed() raises:
     var listener = TCPListener("127.0.0.1", 0)
     var client = TCPStream.connect("127.0.0.1", listener.local_port)
@@ -529,6 +551,8 @@ def main() raises:
     test_connect_refused()
     print("... test_connect_addr")
     test_connect_addr()
+    print("... test_connect_timeout_is_typed")
+    test_connect_timeout_is_typed()
     print("... test_read_timeout_is_typed")
     test_read_timeout_is_typed()
     print("... test_write_timeout_set_clear")

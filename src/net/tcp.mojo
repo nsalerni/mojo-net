@@ -13,15 +13,17 @@
 `TCPListener` accepts connections; `TCPStream` is one connected socket.
 Both are blocking by default and can be switched to non-blocking mode for
 use with `Poller`. Bound blocking stream waits with `set_read_timeout` /
-`set_write_timeout`, which surface expiry as the typed `TIMEOUT_ERROR`
-(check with `is_timeout_error()`). SIGPIPE on writes to a closed peer is
-suppressed on both platforms (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on Linux).
+`set_write_timeout`, and `connect` / `connect_addr` accept an optional
+`timeout_ns`. Expiry surfaces as the typed `TIMEOUT_ERROR` (check with
+`is_timeout_error()`). SIGPIPE on writes to a closed peer is suppressed on
+both platforms (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on Linux).
 """
 
 from std.ffi import c_int, get_errno
 from std.sys import CompilationTarget
 
 from .address import IPv4Address
+from .poll import Poller
 from .resolver import resolve
 from .sockaddr import SOCKADDR_STORAGE_LEN, SocketAddress
 from .stream import ReadinessStream
@@ -30,6 +32,7 @@ from .libc import (
     F_GETFL,
     F_SETFL,
     SHUT_WR,
+    TIMEOUT_ERROR,
     WOULD_BLOCK_ERROR,
     SOCK_STREAM,
     TCP_NODELAY,
@@ -74,6 +77,43 @@ def _new_tcp_socket(family: Int = AF_INET) raises -> c_int:
         # Suppress SIGPIPE on writes to closed peers (Linux: MSG_NOSIGNAL).
         _ = c_setsockopt_int(fd, sol_socket(), so_nosigpipe(), 1)
     return fd
+
+
+def _connect_timeout_ms(timeout_ns: Int64) -> Int:
+    """Converts a nanosecond connect bound to a Poller wait in milliseconds."""
+    var ms = Int((timeout_ns + 999_999) // 1_000_000)
+    if ms < 1:
+        return 1
+    return ms
+
+
+def _is_connect_timeout_errno(errno: Int) -> Bool:
+    """Reports whether a SO_ERROR value means the connect bound expired."""
+    comptime if CompilationTarget.is_macos():
+        return errno == 60  # ETIMEDOUT
+    else:
+        return errno == 110  # ETIMEDOUT
+
+
+def _timed_connect_addr(
+    addr: SocketAddress, timeout_ns: Int64
+) raises -> TCPStream:
+    """Completes a non-blocking connect, waiting at most `timeout_ns`."""
+    var stream = TCPStream.connect_addr_nonblocking(addr)
+    var poller = Poller()
+    poller.register(stream.descriptor(), readable=False, writable=True)
+    var events = poller.wait(_connect_timeout_ms(timeout_ns))
+    if len(events) == 0:
+        stream.close()
+        raise Error(TIMEOUT_ERROR)
+    var so = stream.connect_error()
+    if so != 0:
+        stream.close()
+        if _is_connect_timeout_errno(so):
+            raise Error(TIMEOUT_ERROR)
+        raise Error("connect " + String(addr) + ": errno " + String(so))
+    stream.set_nonblocking(False)
+    return stream^
 
 
 struct TCPStream(ReadinessStream):
@@ -164,23 +204,32 @@ struct TCPStream(ReadinessStream):
         return SocketAddress.from_sockaddr(Span(raw)[0:length])
 
     @staticmethod
-    def connect(host: StringSpan, port: UInt16) raises -> TCPStream:
+    def connect(
+        host: StringSpan,
+        port: UInt16,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> TCPStream:
         """Connects to a hostname or numeric IPv4/IPv6 literal.
 
         Numeric literals are used directly; hostnames resolve via DNS
         and each returned address is tried in the resolver's preference
-        order until one connects.
+        order until one connects. A positive `timeout_ns` bounds each
+        attempt; expiry surfaces as the typed `TIMEOUT_ERROR`.
 
         Args:
             host: Hostname or numeric IP literal.
             port: Destination port.
+            timeout_ns: Optional per-address connect bound in nanoseconds;
+                0 waits for the kernel default (unbounded).
 
         Returns:
             A connected stream.
 
         Raises:
             If resolution fails or no address accepts the connection
-            (the error reflects the last attempt).
+            (the error reflects the last attempt), including the typed
+            `TIMEOUT_ERROR` when `timeout_ns` expires.
         """
         var addrs: List[SocketAddress]
         try:
@@ -188,6 +237,13 @@ struct TCPStream(ReadinessStream):
         except:
             addrs = resolve(host, port)
         var last_err = Error("net: no addresses to try")
+        if timeout_ns > 0:
+            for a in addrs:
+                try:
+                    return _timed_connect_addr(a, timeout_ns)
+                except e:
+                    last_err = e
+            raise last_err
         for a in addrs:
             var fd = _new_tcp_socket(a.family())
             var packed = a.to_sockaddr()
@@ -198,18 +254,27 @@ struct TCPStream(ReadinessStream):
         raise last_err
 
     @staticmethod
-    def connect_addr(addr: SocketAddress) raises -> TCPStream:
+    def connect_addr(
+        addr: SocketAddress,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> TCPStream:
         """Connects to a single already-resolved socket address.
 
         Args:
             addr: The destination address and port.
+            timeout_ns: Optional connect bound in nanoseconds; 0 waits
+                for the kernel default (unbounded).
 
         Returns:
             A connected stream.
 
         Raises:
-            If socket creation or the connection fails.
+            If socket creation or the connection fails, including the
+            typed `TIMEOUT_ERROR` when `timeout_ns` expires.
         """
+        if timeout_ns > 0:
+            return _timed_connect_addr(addr, timeout_ns)
         var fd = _new_tcp_socket(addr.family())
         var packed = addr.to_sockaddr()
         if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) != 0:
