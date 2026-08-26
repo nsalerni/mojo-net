@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4 - 2026-08-26
+
 - Documented the blocking vs `Poller` concurrency contract, and that IPv6
   `::` dual-stack behavior is OS-dependent.
 - Maps `ECONNREFUSED` to `CONNECTION_REFUSED_ERROR` and `ECONNRESET` /
