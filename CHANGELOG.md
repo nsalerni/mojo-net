@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Documented the blocking vs `Poller` concurrency contract, and that IPv6
+  `::` dual-stack behavior is OS-dependent.
 - Maps `ECONNREFUSED` to `CONNECTION_REFUSED_ERROR` and `ECONNRESET` /
   `EPIPE` to `CONNECTION_RESET_ERROR`. Check with `is_connection_refused()`
   and `is_connection_reset()` instead of parsing "errno N".

@@ -62,6 +62,17 @@ See [examples/README.md](examples/README.md).
 
 Platforms: macOS (arm64) and Linux (x86-64, arm64).
 
+`TCPListener("::1", port)` and `TCPListener("::", port)` bind IPv6. Whether
+`::` also accepts IPv4-mapped clients is OS-dependent. Bind `0.0.0.0` and
+`::` separately if you need both families.
+
+## Concurrency
+
+I/O on one stream is blocking and single-threaded. `Poller` plus
+`ReadinessStream` can overlap many sockets on one thread; the application
+still serializes handling. Scale-out is several processes behind a load
+balancer, not an in-process async runtime.
+
 TLS lives in [mojo-tls](https://github.com/nsalerni/mojo-tls).
 
 ## Compliance
