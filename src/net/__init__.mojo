@@ -23,9 +23,10 @@ docs/PRIMITIVES.md).
 Highlights:
 
 - `TCPListener` / `TCPStream`: blocking TCP with per-socket read/write
-  timeouts (SO_RCVTIMEO / SO_SNDTIMEO). Timeouts surface as the typed
-  `TIMEOUT_ERROR`, checked with `is_timeout_error()`. Connected streams
-  expose their kernel-selected local and peer addresses.
+  timeouts (SO_RCVTIMEO / SO_SNDTIMEO) and an optional `timeout_ns` on
+  `connect` / `connect_addr`. Timeouts surface as the typed `TIMEOUT_ERROR`,
+  checked with `is_timeout_error()`. Connected streams expose their
+  kernel-selected local and peer addresses.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
   Linux abstract namespace, connected path inspection, and the same

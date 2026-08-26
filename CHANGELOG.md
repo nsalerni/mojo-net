@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `TCPStream.connect` and `connect_addr` accept `timeout_ns` so a connect
+  cannot hang for the kernel default. The Poller wait is converted with
+  overflow-safe ceiling division and clamped to `epoll_wait`'s range.
+  Expiry is the typed `TIMEOUT_ERROR`.
 - `UnixListener` now exposes `descriptor()` and `set_nonblocking()` so
   servers can drain pending connections through `Poller`. Accepted
   streams inherit the listener's logical blocking mode.
