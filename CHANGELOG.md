@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `write_some` to `IOStream` so protocol layers can recover after a
+  partial write. `TCPStream` and `UnixStream` already implement it.
 - `TCPStream.connect` and `connect_addr` accept `timeout_ns` so a connect
   cannot hang for the kernel default. The Poller wait is converted with
   overflow-safe ceiling division and clamped to `epoll_wait`'s range.
