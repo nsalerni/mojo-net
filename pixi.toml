@@ -1,7 +1,5 @@
 # mojo-net: blocking TCP/UDP sockets, DNS, IPv4/IPv6 for Mojo 1.0.
-#
-# Inside the grpc-mojo monorepo this manifest is a self-contained development
-# workspace. The conda package is defined in recipe/recipe.yaml.
+# The conda package is defined in recipe/recipe.yaml.
 
 [workspace]
 channels = ["https://conda.modular.com/max", "conda-forge"]
