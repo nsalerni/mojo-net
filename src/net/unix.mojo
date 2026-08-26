@@ -31,16 +31,21 @@ from std.sys import CompilationTarget
 
 from .libc import (
     AF_UNIX,
-    SOCK_STREAM,
+    F_GETFL,
+    F_SETFL,
+    WOULD_BLOCK_ERROR,
     c_accept,
     c_bind,
     c_close,
     c_connect,
+    c_fcntl,
     c_getpeername,
     c_getsockname,
     c_listen,
     c_unlink,
     _checked_sockaddr_len,
+    is_timeout_error,
+    o_nonblock,
     os_error,
 )
 from .sockaddr import SOCKADDR_STORAGE_LEN
@@ -371,6 +376,9 @@ struct UnixListener(Movable):
     `remove_existing=True` to unlink a stale socket file first. `close()`
     releases the descriptor but leaves the socket file in place. Remove
     it with the path's owner when the service is done.
+
+    Blocking by default; `set_nonblocking(True)` lets a `Poller` drain
+    pending connections the same way `TCPListener` does.
     """
 
     var fd: c_int
@@ -379,6 +387,8 @@ struct UnixListener(Movable):
     """The bound socket path (or abstract name on Linux)."""
     var closed: Bool
     """True once the descriptor has been closed via `close()`."""
+    var nonblocking: Bool
+    """True while the listening descriptor is in non-blocking mode."""
 
     def __init__(
         out self, path: StringSpan, *, remove_existing: Bool = False
@@ -398,6 +408,7 @@ struct UnixListener(Movable):
         var packed = _pack_sockaddr_un(path)
         self.path = String(path)
         self.closed = False
+        self.nonblocking = False
         if remove_existing and not path.startswith(String(chr(0))):
             var p = self.path.copy()
             _ = c_unlink(p)
@@ -413,21 +424,70 @@ struct UnixListener(Movable):
             self.closed = True
             raise err
 
+    def descriptor(self) -> c_int:
+        """Returns the listening socket descriptor for `Poller`.
+
+        Returns:
+            The owned listening socket descriptor.
+        """
+        return self.fd
+
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches the listener between blocking and non-blocking mode.
+
+        In non-blocking mode, `accept()` raises the typed
+        `WOULD_BLOCK_ERROR` when the pending connection queue is empty.
+        Wait for readable readiness with `Poller` before trying again.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking.
+
+        Raises:
+            If the fcntl calls fail.
+        """
+        var flags = c_fcntl(self.fd, F_GETFL, 0)
+        if flags < 0:
+            raise os_error("fcntl(F_GETFL)")
+        var updated: c_int
+        if enabled:
+            updated = flags | o_nonblock()
+        else:
+            updated = flags & ~o_nonblock()
+        if c_fcntl(self.fd, F_SETFL, Int(updated)) < 0:
+            raise os_error("fcntl(F_SETFL)")
+        self.nonblocking = enabled
+
     def accept(self) raises -> UnixStream:
-        """Blocks until a client connects, then returns its stream.
+        """Accepts one pending connection and returns its stream.
+
+        Blocks by default. In non-blocking mode, an empty pending queue
+        raises the typed `WOULD_BLOCK_ERROR`. The accepted stream inherits
+        the listener's logical blocking mode on every supported platform.
 
         Returns:
             The accepted connection as a `UnixStream`.
 
         Raises:
-            If the accept call fails.
+            If the accept call or descriptor mode update fails.
         """
         var sa = Array[UInt8, SOCKADDR_STORAGE_LEN](fill=0)
         var sa_len = c_int(SOCKADDR_STORAGE_LEN)
         var fd = c_accept(self.fd, sa.unsafe_ptr(), Pointer(to=sa_len))
         if fd < 0:
-            raise os_error("accept")
-        return UnixStream(stream=TCPStream(fd))
+            var err = os_error("accept")
+            if self.nonblocking and is_timeout_error(err):
+                raise Error(WOULD_BLOCK_ERROR)
+            raise err
+        var stream = UnixStream(stream=TCPStream(fd))
+        try:
+            # BSD kernels inherit O_NONBLOCK across accept while Linux does
+            # not. Apply the public listener mode explicitly so the wrapper
+            # state and descriptor flags agree on both platforms.
+            stream.set_nonblocking(self.nonblocking)
+        except e:
+            stream.close()
+            raise e
+        return stream^
 
     def close(mut self):
         """Closes the listening socket; safe to call more than once.

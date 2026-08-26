@@ -28,7 +28,8 @@ Highlights:
   expose their kernel-selected local and peer addresses.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
-  Linux abstract namespace and connected path inspection.
+  Linux abstract namespace, connected path inspection, and the same
+  `descriptor()` / `set_nonblocking()` accept path as `TCPListener`.
 - `SocketAddress`: IPv4 and IPv6 addresses with platform `sockaddr` coding.
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
 - `Poller`: readiness polling over kqueue/epoll for non-blocking sockets

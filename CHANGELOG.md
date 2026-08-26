@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `UnixListener` now exposes `descriptor()` and `set_nonblocking()` so
+  servers can drain pending connections through `Poller`. Accepted
+  streams inherit the listener's logical blocking mode.
 - Shortened the README and added contributor, issue, and pull-request
   templates.
 - Removed a stray duplicate `unix.mojo` from the repository root.

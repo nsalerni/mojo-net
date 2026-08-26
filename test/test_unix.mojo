@@ -6,8 +6,16 @@ from std.ffi import c_int, external_call
 from std.sys import CompilationTarget
 from std.testing import assert_equal, assert_true
 
-from net import TCPStream, UnixListener, UnixStream, is_timeout_error
-from net.libc import AF_UNIX, SOCK_STREAM
+from net import (
+    PollEvent,
+    Poller,
+    TCPStream,
+    UnixListener,
+    UnixStream,
+    is_timeout_error,
+    is_would_block,
+)
+from net.libc import AF_UNIX, F_GETFL, SOCK_STREAM, c_fcntl, o_nonblock
 
 
 def sock_path(tag: StringSpan) -> String:
@@ -275,6 +283,105 @@ def test_abstract_namespace() raises:
         assert_true(raised, "abstract names must be rejected on macOS")
 
 
+def _readable(events: List[PollEvent], fd: Int) -> Bool:
+    for ev in events:
+        if Int(ev.fd) == fd and ev.readable:
+            return True
+    return False
+
+
+def test_nonblocking_accept_drains_burst() raises:
+    var path = sock_path("nb-accept")
+    var poller = Poller()
+    var listener = UnixListener(path, remove_existing=True)
+    assert_equal(
+        Int(listener.descriptor()), Int(listener.fd), "listener descriptor"
+    )
+    assert_true(not listener.nonblocking, "listeners are blocking by default")
+    listener.set_nonblocking(True)
+    assert_true(listener.nonblocking, "listener entered non-blocking mode")
+    poller.register(listener.descriptor(), readable=True, writable=False)
+
+    var client_count = 8
+    var clients = List[UnixStream]()
+    for _ in range(client_count):
+        clients.append(UnixStream.connect(path))
+
+    assert_true(
+        _readable(poller.wait(2000), Int(listener.descriptor())),
+        "listener readable for a connection burst",
+    )
+
+    var accepted = List[UnixStream]()
+    while True:
+        try:
+            accepted.append(listener.accept())
+        except e:
+            assert_true(is_would_block(e), "drained accept queue: " + String(e))
+            break
+    assert_equal(len(accepted), client_count, "all burst connections accepted")
+
+    listener.set_nonblocking(False)
+    assert_true(not listener.nonblocking, "listener restored blocking mode")
+    for i in range(len(clients)):
+        clients[i].close()
+    for i in range(len(accepted)):
+        accepted[i].close()
+    listener.close()
+    poller.close()
+    cleanup(path)
+
+
+def test_accepted_stream_inherits_listener_mode() raises:
+    var path = sock_path("nb-inherit")
+    var listener = UnixListener(path, remove_existing=True)
+
+    var blocking_client = UnixStream.connect(path)
+    var blocking_child = listener.accept()
+    var flags = c_fcntl(blocking_child.stream.fd, F_GETFL, 0)
+    assert_true(flags >= 0, "read blocking child flags")
+    assert_true(
+        not blocking_child.stream.nonblocking, "blocking wrapper state"
+    )
+    assert_equal(Int(flags & o_nonblock()), 0, "blocking descriptor flags")
+
+    listener.set_nonblocking(True)
+    var accept_poller = Poller()
+    accept_poller.register(
+        listener.descriptor(), readable=True, writable=False
+    )
+    var nonblocking_client = UnixStream.connect(path)
+    assert_true(
+        _readable(accept_poller.wait(2000), Int(listener.descriptor())),
+        "non-blocking listener became readable",
+    )
+    var nonblocking_child = listener.accept()
+    flags = c_fcntl(nonblocking_child.stream.fd, F_GETFL, 0)
+    assert_true(flags >= 0, "read non-blocking child flags")
+    assert_true(
+        nonblocking_child.stream.nonblocking, "non-blocking wrapper state"
+    )
+    assert_true(
+        (flags & o_nonblock()) != 0, "non-blocking descriptor flags"
+    )
+
+    var blocked = False
+    try:
+        _ = nonblocking_child.read_exact(1)
+    except e:
+        blocked = True
+        assert_true(is_would_block(e), "empty accepted stream: " + String(e))
+    assert_true(blocked, "empty accepted stream must not block")
+
+    blocking_client.close()
+    blocking_child.close()
+    nonblocking_client.close()
+    nonblocking_child.close()
+    accept_poller.close()
+    listener.close()
+    cleanup(path)
+
+
 def main() raises:
     test_echo_and_eof()
     test_connection_paths()
@@ -287,4 +394,6 @@ def main() raises:
     test_into_stream()
     test_double_close()
     test_abstract_namespace()
+    test_nonblocking_accept_drains_burst()
+    test_accepted_stream_inherits_listener_mode()
     print("test_unix: all tests passed")
