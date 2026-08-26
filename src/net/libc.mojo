@@ -198,13 +198,29 @@ directly.
 """
 
 
-def os_error(var context: String) -> Error:
-    """Builds an `Error` from the current errno, mapping timeouts specially.
+comptime CONNECTION_REFUSED_ERROR = "net: connection refused"
+"""Message carried when the peer has nothing listening.
 
-    When errno is EAGAIN/EWOULDBLOCK (35 on macOS, 11 on Linux), the value a
-    blocking socket call returns after an SO_RCVTIMEO/SO_SNDTIMEO timeout
-    expires, the returned error carries exactly `TIMEOUT_ERROR` so callers
-    can detect it with `is_timeout_error()`. All other errno values produce
+Raised from `connect` when errno is `ECONNREFUSED`. Check with
+`is_connection_refused()` rather than parsing "errno N".
+"""
+
+
+comptime CONNECTION_RESET_ERROR = "net: connection reset"
+"""Message carried when the peer reset or closed the connection.
+
+Raised when errno is `ECONNRESET` or `EPIPE`. Check with
+`is_connection_reset()` rather than parsing "errno 104".
+"""
+
+
+def os_error(var context: String) -> Error:
+    """Builds an `Error` from the current errno, mapping common cases.
+
+    Timeouts (`EAGAIN`/`EWOULDBLOCK` after `SO_RCVTIMEO`/`SO_SNDTIMEO`)
+    become `TIMEOUT_ERROR`. `ECONNREFUSED` becomes
+    `CONNECTION_REFUSED_ERROR`. `ECONNRESET` and `EPIPE` become
+    `CONNECTION_RESET_ERROR`. All other errno values produce
     "context: errno N".
 
     Call this immediately after the failing libc call, before anything else
@@ -217,13 +233,22 @@ def os_error(var context: String) -> Error:
         An `Error` describing the failure.
     """
     var e = get_errno()
+    var code = e.value
     comptime if CompilationTarget.is_macos():
-        if e.value == 35:  # EAGAIN == EWOULDBLOCK on macOS
+        if code == 35:  # EAGAIN == EWOULDBLOCK
             return Error(TIMEOUT_ERROR)
+        if code == 61:  # ECONNREFUSED
+            return Error(CONNECTION_REFUSED_ERROR)
+        if code == 54 or code == 32:  # ECONNRESET, EPIPE
+            return Error(CONNECTION_RESET_ERROR)
     else:
-        if e.value == 11:  # EAGAIN/EWOULDBLOCK on Linux
+        if code == 11:  # EAGAIN/EWOULDBLOCK
             return Error(TIMEOUT_ERROR)
-    return Error(context + ": errno " + String(e.value))
+        if code == 111:  # ECONNREFUSED
+            return Error(CONNECTION_REFUSED_ERROR)
+        if code == 104 or code == 32:  # ECONNRESET, EPIPE
+            return Error(CONNECTION_RESET_ERROR)
+    return Error(context + ": errno " + String(code))
 
 
 comptime WOULD_BLOCK_ERROR = "net: would block"
@@ -264,6 +289,30 @@ def is_timeout_error(e: Error) -> Bool:
         True if the error is the typed `TIMEOUT_ERROR`.
     """
     return String(e) == TIMEOUT_ERROR
+
+
+def is_connection_refused(e: Error) -> Bool:
+    """Reports whether an error is a refused TCP or Unix connect.
+
+    Args:
+        e: The error to inspect.
+
+    Returns:
+        True if the error is the typed `CONNECTION_REFUSED_ERROR`.
+    """
+    return String(e) == CONNECTION_REFUSED_ERROR
+
+
+def is_connection_reset(e: Error) -> Bool:
+    """Reports whether an error is a peer reset or broken pipe.
+
+    Args:
+        e: The error to inspect.
+
+    Returns:
+        True if the error is the typed `CONNECTION_RESET_ERROR`.
+    """
+    return String(e) == CONNECTION_RESET_ERROR
 
 
 # --- Thin syscall wrappers (return raw results; callers check and raise) ---

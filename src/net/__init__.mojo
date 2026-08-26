@@ -25,7 +25,9 @@ Highlights:
 - `TCPListener` / `TCPStream`: blocking TCP with per-socket read/write
   timeouts (SO_RCVTIMEO / SO_SNDTIMEO) and an optional `timeout_ns` on
   `connect` / `connect_addr`. Timeouts surface as the typed `TIMEOUT_ERROR`,
-  checked with `is_timeout_error()`. Connected streams expose their
+  checked with `is_timeout_error()`. Refused connects and peer resets are
+  `CONNECTION_REFUSED_ERROR` and `CONNECTION_RESET_ERROR`. Connected streams
+  expose their
   kernel-selected local and peer addresses.
 - `UDPSocket`: bound datagram sockets with `send_to` / `recv_from`.
 - `UnixListener` / `UnixStream`: Unix domain stream sockets, including the
@@ -54,8 +56,12 @@ def main() raises:
 
 from .address import IPv4Address
 from .libc import (
+    CONNECTION_REFUSED_ERROR,
+    CONNECTION_RESET_ERROR,
     TIMEOUT_ERROR,
     WOULD_BLOCK_ERROR,
+    is_connection_refused,
+    is_connection_reset,
     is_timeout_error,
     is_would_block,
 )
