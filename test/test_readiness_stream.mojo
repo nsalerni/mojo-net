@@ -81,7 +81,31 @@ def test_unix_conformance() raises:
     cleanup(path^)
 
 
+def write_some_via_iostream[S: IOStream](
+    stream: S, data: Span[Byte, _]
+) raises -> Int:
+    """Calls `write_some` through the blocking `IOStream` trait."""
+    return stream.write_some(data)
+
+
+def test_iostream_write_some() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server = listener.accept()
+    var payload = String("iostream write_some")
+    assert_equal(
+        write_some_via_iostream(client, payload.as_bytes()),
+        payload.byte_length(),
+    )
+    var got = server.read_exact(payload.byte_length())
+    assert_equal(String(from_utf8=got), payload)
+    client.close()
+    server.close()
+    listener.close()
+
+
 def main() raises:
     test_tcp_conformance()
     test_unix_conformance()
+    test_iostream_write_some()
     print("test_readiness_stream: all tests passed")

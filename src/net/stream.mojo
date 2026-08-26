@@ -54,6 +54,26 @@ trait IOStream(Deinitable, Movable):
         """
         ...
 
+    def write_some(self, data: Span[Byte, _]) raises -> Int:
+        """Writes as much of the span as the transport accepts in one attempt.
+
+        Required on every `IOStream` (no default). Blocking streams typically
+        accept the whole span or raise. Protocol layers that need to recover
+        from a mid-write failure drop the accepted prefix from their send
+        buffer.
+
+        Args:
+            data: The bytes to offer.
+
+        Returns:
+            Bytes accepted, or zero when data is empty.
+
+        Raises:
+            On I/O errors, including the typed timeout error when a write
+            timeout expires.
+        """
+        ...
+
     def set_read_timeout(self, nanos: Int64) raises:
         """Bounds blocking reads; expiry raises the typed timeout error.
 
