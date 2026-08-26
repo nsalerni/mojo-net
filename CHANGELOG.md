@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Maps `ECONNREFUSED` to `CONNECTION_REFUSED_ERROR` and `ECONNRESET` /
+  `EPIPE` to `CONNECTION_RESET_ERROR`. Check with `is_connection_refused()`
+  and `is_connection_reset()` instead of parsing "errno N".
 - Added `write_some` to `IOStream` so protocol layers can recover after a
   partial write. `TCPStream` and `UnixStream` already implement it. This
   is a source break for custom `IOStream` types: they must add

@@ -24,6 +24,8 @@ from net import (
     TCPListener,
     TCPStream,
     UDPSocket,
+    is_connection_refused,
+    is_connection_reset,
     is_timeout_error,
     resolve,
 )
@@ -230,7 +232,7 @@ def test_connect_refused() raises:
         _ = TCPStream.connect("127.0.0.1", port)
     except e:
         msg = String(e)
-    assert_true("connect" in msg and "errno" in msg, msg)
+    assert_true(is_connection_refused(Error(msg)), msg)
     assert_false(is_timeout_error(Error(msg)), "refusal is not a timeout")
 
 
@@ -252,7 +254,7 @@ def test_connect_addr() raises:
         _ = TCPStream.connect_addr(SocketAddress.parse("127.0.0.1", addr.port))
     except e:
         msg = String(e)
-    assert_true("connect" in msg, msg)
+    assert_true(is_connection_refused(Error(msg)), msg)
 
 
 def test_connect_timeout_is_typed() raises:
@@ -522,8 +524,12 @@ def test_sigpipe_suppressed() raises:
         for _ in range(50):
             client.write_all(Span(chunk))
             sleep(0.01)
-    except:
+    except e:
         raised = True
+        assert_true(
+            is_connection_reset(e) or is_timeout_error(e),
+            String(e),
+        )
     assert_true(raised, "write to a closed peer must raise (not SIGPIPE)")
     client.close()
     listener.close()
