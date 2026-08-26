@@ -80,11 +80,23 @@ def _new_tcp_socket(family: Int = AF_INET) raises -> c_int:
 
 
 def _connect_timeout_ms(timeout_ns: Int64) -> Int:
-    """Converts a nanosecond connect bound to a Poller wait in milliseconds."""
-    var ms = Int((timeout_ns + 999_999) // 1_000_000)
+    """Converts a nanosecond connect bound to a Poller wait in milliseconds.
+
+    Ceiling-divides without adding near `Int64` max, then clamps to the
+    positive `c_int` range `epoll_wait` accepts.
+    """
+    comptime _NS_PER_MS = Int64(1_000_000)
+    comptime _MAX_WAIT_MS = 2_147_483_647
+    if timeout_ns <= 0:
+        return 1
+    var ms = timeout_ns // _NS_PER_MS
+    if timeout_ns % _NS_PER_MS != 0:
+        ms += 1
     if ms < 1:
         return 1
-    return ms
+    if ms > Int64(_MAX_WAIT_MS):
+        return _MAX_WAIT_MS
+    return Int(ms)
 
 
 def _is_connect_timeout_errno(errno: Int) -> Bool:
