@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Shortened the README and added contributor, issue, and pull-request
+  templates.
+- Removed a stray duplicate `unix.mojo` from the repository root.
 - Accepted TCP streams now inherit the listener's logical blocking mode on
   macOS and Linux.
 - Added local and peer endpoint inspection for connected TCP and Unix domain
