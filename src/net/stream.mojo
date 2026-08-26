@@ -57,9 +57,10 @@ trait IOStream(Deinitable, Movable):
     def write_some(self, data: Span[Byte, _]) raises -> Int:
         """Writes as much of the span as the transport accepts in one attempt.
 
-        Blocking streams typically accept the whole span or raise. Protocol
-        layers that need to recover from a mid-write failure drop the
-        accepted prefix from their send buffer.
+        Required on every `IOStream` (no default). Blocking streams typically
+        accept the whole span or raise. Protocol layers that need to recover
+        from a mid-write failure drop the accepted prefix from their send
+        buffer.
 
         Args:
             data: The bytes to offer.
