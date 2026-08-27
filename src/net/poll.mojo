@@ -12,8 +12,10 @@
 
 `Poller` watches file descriptors for readability and writability so a
 single thread can serve many non-blocking sockets: register descriptors,
-call `wait()`, act on the returned events, repeat. Mojo 1.0 has no threads
-or async, but an event loop needs neither.
+call `wait()`, act on the returned events, repeat. Mojo 1.0 has `async def`
+syntax but no public async I/O runtime (`std.runtime._asyncrt` is private)
+and no `std.thread`. `Poller` is a caller-driven event loop and needs
+neither.
 
 Platform notes handled here: kqueue reports read and write interest as two
 separate filters (a descriptor registered for both can produce two events

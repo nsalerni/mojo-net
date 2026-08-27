@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Documented that Unix datagram sockets are optional future work, and that
+  async/await adapters on `Poller` wait on a public Mojo async I/O runtime.
+
 ## 0.2.4 - 2026-08-26
 
 - Documented the blocking vs `Poller` concurrency contract, and that IPv6
