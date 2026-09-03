@@ -309,6 +309,28 @@ def test_write_timeout_set_clear() raises:
     listener.close()
 
 
+def test_write_timeout_expires() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server_side = listener.accept()
+    client.set_write_timeout(50_000_000)
+    var chunk = List[Byte](length=64 * 1024, fill=0x61)
+    var timed_out = False
+    try:
+        var i = 0
+        while i < 1024:
+            client.write_all(Span(chunk))
+            i += 1
+    except e:
+        timed_out = is_timeout_error(e)
+        if not timed_out:
+            raise e
+    assert_true(timed_out, "full send buffer must surface TIMEOUT_ERROR")
+    client.close()
+    server_side.close()
+    listener.close()
+
+
 def test_nodelay_toggle() raises:
     var listener = TCPListener("127.0.0.1", 0)
     var client = TCPStream.connect("127.0.0.1", listener.local_port)
@@ -563,6 +585,8 @@ def main() raises:
     test_read_timeout_is_typed()
     print("... test_write_timeout_set_clear")
     test_write_timeout_set_clear()
+    print("... test_write_timeout_expires")
+    test_write_timeout_expires()
     print("... test_nodelay_toggle")
     test_nodelay_toggle()
     print("... test_bytes_available")

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-09-03
+
+- Added `set_write_timeout` to `IOStream` so protocol layers can bound
+  blocking writes through the trait. `TCPStream` and `UnixStream` already
+  implement it. This is a source break for custom `IOStream` types: they
+  must add `set_write_timeout`; there is no default implementation.
 - Documented that Unix datagram sockets are optional future work, and that
   async/await adapters on `Poller` wait on a public Mojo async I/O runtime.
 
