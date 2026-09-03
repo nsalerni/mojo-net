@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.6 - 2026-09-03
+
+- Added `Wakeup`, a POSIX self-pipe that can wake a blocked
+  `Poller.wait`. `notify()` writes one byte with `write(2)` so a C
+  signal handler can use the same write end. `drain()` consumes pending
+  bytes. This is not an async runtime and is not a cross-thread API.
+
 ## 0.2.5 - 2026-09-03
 
 - Added `set_write_timeout` to `IOStream` so protocol layers can bound

@@ -5,7 +5,7 @@
 channels = ["https://conda.modular.com/max", "conda-forge"]
 name = "mojo-net"
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
-version = "0.2.5"
+version = "0.2.6"
 license = "Apache-2.0"
 preview = ["pixi-build"]
 
@@ -23,7 +23,7 @@ python = ">=3.11"
 
 [package]
 name = "mojo-net"
-version = "0.2.5"
+version = "0.2.6"
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "0.*" }

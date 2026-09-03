@@ -57,6 +57,7 @@ See [examples/README.md](examples/README.md).
 - `UDPSocket` — `send_to` / `recv_from`
 - `UnixListener` / `UnixStream` — filesystem paths and Linux abstract names
 - `Poller` — kqueue (macOS) and epoll (Linux)
+- `Wakeup` — self-pipe that wakes a blocked `Poller.wait`
 - `ReadinessStream` — non-blocking reads and partial writes
 - `resolve()` — `getaddrinfo` for IPv4 and IPv6
 

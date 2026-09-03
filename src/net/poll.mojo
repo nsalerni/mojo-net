@@ -15,7 +15,8 @@ single thread can serve many non-blocking sockets: register descriptors,
 call `wait()`, act on the returned events, repeat. Mojo 1.0 has `async def`
 syntax but no public async I/O runtime (`std.runtime._asyncrt` is private)
 and no `std.thread`. `Poller` is a caller-driven event loop and needs
-neither.
+neither. Pair it with `Wakeup` when the loop must return because of a
+stop flag or a POSIX signal rather than socket readiness.
 
 Platform notes handled here: kqueue reports read and write interest as two
 separate filters (a descriptor registered for both can produce two events

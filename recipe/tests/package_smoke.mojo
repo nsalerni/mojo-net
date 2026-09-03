@@ -3,6 +3,7 @@ from net import (
     Poller,
     TCPListener,
     TCPStream,
+    Wakeup,
     is_would_block,
 )
 
@@ -35,4 +36,14 @@ def main() raises:
     accepted.close()
     poller.close()
     listener.close()
+
+    var wakeup = Wakeup()
+    var wake_poller = Poller()
+    wake_poller.register(wakeup.descriptor(), readable=True, writable=False)
+    wakeup.notify()
+    if len(wake_poller.wait(5000)) == 0:
+        raise Error("installed Wakeup did not wake Poller.wait")
+    wakeup.drain()
+    wakeup.close()
+    wake_poller.close()
     print("mojo-net package smoke test passed")

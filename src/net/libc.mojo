@@ -22,7 +22,7 @@ result and never raise; callers check the result and raise via `os_error()`.
 Constant values were verified against the macOS and Linux system headers.
 """
 
-from std.ffi import external_call, c_int, get_errno
+from std.ffi import external_call, c_int, c_ssize_t, get_errno
 from std.sys import CompilationTarget
 
 
@@ -141,6 +141,10 @@ comptime F_GETFL = 3
 """`fcntl(2)` command that reads a descriptor's status flags."""
 comptime F_SETFL = 4
 """`fcntl(2)` command that writes a descriptor's status flags."""
+comptime F_SETFD = 2
+"""`fcntl(2)` command that writes a descriptor's file-descriptor flags."""
+comptime FD_CLOEXEC = 1
+"""File-descriptor flag that closes the fd across `exec(2)`."""
 
 
 def o_nonblock() -> c_int:
@@ -650,6 +654,74 @@ def c_recvfrom(
     return Int(
         external_call["recvfrom", Int](fd, buf, length, flags, addr, addr_len)
     )
+
+
+def c_pipe(fds: MutPointer[c_int, _]) -> c_int:
+    """Calls `pipe(2)` to create a connected pair of file descriptors.
+
+    `fds` must point at two contiguous `c_int` values. On success they
+    receive the read end and the write end, in that order.
+
+    Args:
+        fds: Output array of two integers.
+
+    Returns:
+        0 on success, -1 on failure (errno is set).
+    """
+    return external_call["pipe", c_int](fds)
+
+
+def c_read(fd: c_int, buf: MutPointer[UInt8, _], length: Int) -> Int:
+    """Calls `read(2)` to receive bytes from a descriptor.
+
+    Args:
+        fd: The file descriptor.
+        buf: Output buffer for the received bytes.
+        length: Capacity of `buf` in bytes.
+
+    Returns:
+        The number of bytes read, 0 on orderly EOF, or a negative value
+        on failure (errno is set).
+    """
+    return Int(
+        external_call["read", c_ssize_t](Int(fd), buf, length)
+    )
+
+
+def c_write(fd: c_int, buf: ImmPointer[UInt8, _], length: Int) -> Int:
+    """Calls `write(2)` to send bytes to a descriptor.
+
+    This is the POSIX `write`, not `send(2)`. Use it on pipes; it is the
+    only I/O call that is async-signal-safe.
+
+    Args:
+        fd: The file descriptor.
+        buf: Pointer to the bytes to send.
+        length: Number of bytes to send.
+
+    Returns:
+        The number of bytes written, or a negative value on failure
+        (errno is set).
+    """
+    return Int(
+        external_call["write", c_ssize_t](Int(fd), buf, length)
+    )
+
+
+def errno_is_eagain() -> Bool:
+    """Reports whether the current errno is `EAGAIN`/`EWOULDBLOCK`.
+
+    Call immediately after a failing libc operation, before anything else
+    can overwrite errno.
+
+    Returns:
+        True when a non-blocking operation would have blocked.
+    """
+    var code = get_errno().value
+    comptime if CompilationTarget.is_macos():
+        return code == 35
+    else:
+        return code == 11
 
 
 def c_fcntl(fd: c_int, cmd: Int, arg: Int) -> c_int:
