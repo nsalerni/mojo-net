@@ -37,6 +37,8 @@ Highlights:
 - `resolve()`: hostname resolution via `getaddrinfo(3)`.
 - `Poller`: readiness polling over kqueue/epoll for non-blocking sockets
   (`set_nonblocking`, `write_some`, `connect_addr_nonblocking`).
+- `Wakeup`: a self-pipe that can wake a blocked `Poller.wait` with
+  `notify()`, including from a C `sigaction` handler via `write(2)`.
 - `ReadinessStream`: the shared descriptor and partial-I/O contract
   implemented by TCP and Unix streams.
 
@@ -66,6 +68,7 @@ from .libc import (
     is_would_block,
 )
 from .poll import PollEvent, Poller
+from .wakeup import Wakeup
 from .resolver import resolve
 from .stream import IOStream, ReadinessStream
 from .sockaddr import SocketAddress
