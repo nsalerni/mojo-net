@@ -88,6 +88,12 @@ def write_some_via_iostream[S: IOStream](
     return stream.write_some(data)
 
 
+def set_write_timeout_via_iostream[S: IOStream](mut stream: S) raises:
+    """Calls `set_write_timeout` through the blocking `IOStream` trait."""
+    stream.set_write_timeout(2_000_000_000)
+    stream.set_write_timeout(0)
+
+
 def test_iostream_write_some() raises:
     var listener = TCPListener("127.0.0.1", 0)
     var client = TCPStream.connect("127.0.0.1", listener.local_port)
@@ -104,8 +110,20 @@ def test_iostream_write_some() raises:
     listener.close()
 
 
+def test_iostream_write_timeout() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server = listener.accept()
+    set_write_timeout_via_iostream(client)
+    set_write_timeout_via_iostream(server)
+    client.close()
+    server.close()
+    listener.close()
+
+
 def main() raises:
     test_tcp_conformance()
     test_unix_conformance()
     test_iostream_write_some()
+    test_iostream_write_timeout()
     print("test_readiness_stream: all tests passed")

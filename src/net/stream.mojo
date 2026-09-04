@@ -85,6 +85,21 @@ trait IOStream(Deinitable, Movable):
         """
         ...
 
+    def set_write_timeout(self, nanos: Int64) raises:
+        """Bounds blocking writes; expiry raises the typed timeout error.
+
+        Required on every `IOStream` (no default). `TCPStream` and
+        `UnixStream` already implement it. Custom types must add this
+        method when compiling against this package version.
+
+        Args:
+            nanos: Timeout in nanoseconds; 0 clears the timeout.
+
+        Raises:
+            If the underlying call fails.
+        """
+        ...
+
     def set_nodelay(self, enabled: Bool) raises:
         """Requests immediate sends for small writes where that exists.
 
