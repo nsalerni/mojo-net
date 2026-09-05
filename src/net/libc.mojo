@@ -806,19 +806,21 @@ def c_lstat_is_socket(mut path: String) -> c_int:
         if get_errno().value == ENOENT:
             return -1
         return -2
-    var mode: UInt32 = 0
     comptime if CompilationTarget.is_macos():
-        mode = UInt32(buf[4]) | (UInt32(buf[5]) << 8)
+        var mode = UInt32(buf[4]) | (UInt32(buf[5]) << 8)
+        if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+            return 1
+        return 0
     else:
-        mode = (
+        var mode = (
             UInt32(buf[24])
             | (UInt32(buf[25]) << 8)
             | (UInt32(buf[26]) << 16)
             | (UInt32(buf[27]) << 24)
         )
-    if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
-        return 1
-    return 0
+        if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+            return 1
+        return 0
 
 
 def c_inet_pton(af: Int, mut src: String, dst: MutPointer[UInt8, _]) -> c_int:
