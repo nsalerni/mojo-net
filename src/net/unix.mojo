@@ -22,8 +22,9 @@ The `sockaddr_un` layout differs between the platforms: macOS/BSD packs a
 16-bit family then 108 path bytes. Both are handled here.
 
 Socket files are not removed automatically: binding an existing path fails
-(like CPython) unless `remove_existing=True`, and `close()` leaves the
-file for the owner to unlink.
+(like CPython) unless `remove_existing=True` (which unlinks a stale socket
+only, never a regular file), and `close()` leaves the file for the owner
+to unlink.
 """
 
 from std.ffi import c_int
@@ -42,6 +43,7 @@ from .libc import (
     c_getpeername,
     c_getsockname,
     c_listen,
+    c_lstat_is_socket,
     c_unlink,
     _checked_sockaddr_len,
     is_timeout_error,
@@ -399,7 +401,9 @@ struct UnixListener(Movable):
             path: Filesystem path to bind; on Linux a NUL-prefixed name
                 binds the abstract namespace instead.
             remove_existing: Unlink an existing socket file at `path`
-                before binding (has no effect on abstract names).
+                before binding (has no effect on abstract names). A
+                regular file or other non-socket at `path` is not
+                removed.
 
         Raises:
             If the path is invalid, already bound, or socket creation,
@@ -411,7 +415,13 @@ struct UnixListener(Movable):
         self.nonblocking = False
         if remove_existing and not path.startswith(String(chr(0))):
             var p = self.path.copy()
-            _ = c_unlink(p)
+            var kind = c_lstat_is_socket(p)
+            if kind == 0:
+                raise Error("net: existing path is not a socket")
+            if kind < -1:
+                raise os_error("lstat " + self.path)
+            if kind == 1:
+                _ = c_unlink(p)
         self.fd = _new_tcp_socket(AF_UNIX)
         if c_bind(self.fd, packed[0].unsafe_ptr(), packed[1]) != 0:
             var err = os_error("bind " + self.path)

@@ -774,6 +774,55 @@ def c_unlink(mut path: String) -> c_int:
     return external_call["unlink", c_int](path.as_c_string_slice())
 
 
+comptime S_IFMT = 0xF000
+"""`stat(2)` file-type mask. Same value on macOS and Linux."""
+comptime S_IFSOCK = 0xC000
+"""`stat(2)` socket file type. Same value on macOS and Linux."""
+comptime ENOENT = 2
+"""`errno` for a missing path. Same value on macOS and Linux."""
+
+
+def c_lstat_is_socket(mut path: String) -> c_int:
+    """Calls `lstat(2)` and reports whether `path` is a Unix socket.
+
+    `struct stat` is large and platform-specific; only `st_mode` is read.
+    On macOS it is a 16-bit field at offset 4. On Linux it is a 32-bit
+    field at offset 24.
+
+    Args:
+        path: Filesystem path to inspect. Mutable only because passing a
+            C string requires it.
+
+    Returns:
+        1 if the path is a socket, 0 if it exists and is not a socket,
+        -1 if the path does not exist, -2 if `lstat` failed for another
+        reason (errno is set).
+    """
+    var buf = Array[UInt8, 256](fill=0)
+    if (
+        external_call["lstat", c_int](path.as_c_string_slice(), buf.unsafe_ptr())
+        != 0
+    ):
+        if get_errno().value == ENOENT:
+            return -1
+        return -2
+    comptime if CompilationTarget.is_macos():
+        var mode = UInt32(buf[4]) | (UInt32(buf[5]) << 8)
+        if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+            return 1
+        return 0
+    else:
+        var mode = (
+            UInt32(buf[24])
+            | (UInt32(buf[25]) << 8)
+            | (UInt32(buf[26]) << 16)
+            | (UInt32(buf[27]) << 24)
+        )
+        if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+            return 1
+        return 0
+
+
 def c_inet_pton(af: Int, mut src: String, dst: MutPointer[UInt8, _]) -> c_int:
     """Calls `inet_pton(3)` to parse a numeric IP literal into binary form.
 
