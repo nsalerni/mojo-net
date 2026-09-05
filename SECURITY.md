@@ -16,3 +16,13 @@ security.
 Reports about descriptor lifecycle, address handling, platform socket layouts,
 or Poller event handling are in scope. The project has not had an external
 security review.
+
+## Residual risks
+
+- `UnixListener(..., remove_existing=True)` unlinks only an existing
+  socket file. A regular file at the bind path is left in place and the
+  bind fails with a typed error.
+- Listeners bind numeric IP literals or explicit Unix paths only. DNS
+  happens through `resolve()` at the caller's request.
+- This package does not authenticate peers or encrypt traffic. Use
+  mojo-tls for TLS.

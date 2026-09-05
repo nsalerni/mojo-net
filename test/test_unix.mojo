@@ -215,6 +215,25 @@ def test_bind_semantics() raises:
     cleanup(path^)
 
 
+def test_remove_existing_refuses_regular_file() raises:
+    var path = sock_path("not-sock")
+    var file = open(path, "w")
+    file.write_all(String("not a socket").as_bytes())
+    file.close()
+    var raised = False
+    try:
+        _ = UnixListener(path, remove_existing=True)
+    except e:
+        raised = True
+        assert_true("not a socket" in String(e), String(e))
+    assert_true(raised, "remove_existing must not unlink a regular file")
+    var leftover = open(path, "r")
+    var body = leftover.read()
+    leftover.close()
+    assert_true("not a socket" in body, "regular file must still exist")
+    cleanup(path^)
+
+
 def test_path_too_long() raises:
     var long_path = String("/tmp/")
     for _ in range(120):
@@ -390,6 +409,7 @@ def main() raises:
     test_read_timeout_is_typed()
     test_connect_failures()
     test_bind_semantics()
+    test_remove_existing_refuses_regular_file()
     test_path_too_long()
     test_into_stream()
     test_double_close()
