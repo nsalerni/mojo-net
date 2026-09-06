@@ -21,7 +21,9 @@ security review.
 
 - `UnixListener(..., remove_existing=True)` unlinks only an existing
   socket file. A regular file at the bind path is left in place and the
-  bind fails with a typed error.
+  bind fails with a typed error. The `lstat`/`unlink` pair is not atomic:
+  a concurrent replacement of a socket with a regular file can still be
+  deleted. Use a caller-owned directory that is not concurrently writable.
 - Listeners bind numeric IP literals or explicit Unix paths only. DNS
   happens through `resolve()` at the caller's request.
 - This package does not authenticate peers or encrypt traffic. Use

@@ -786,8 +786,8 @@ def c_lstat_is_socket(mut path: String) -> c_int:
     """Calls `lstat(2)` and reports whether `path` is a Unix socket.
 
     `struct stat` is large and platform-specific; only `st_mode` is read.
-    On macOS it is a 16-bit field at offset 4. On Linux it is a 32-bit
-    field at offset 24.
+    On macOS it is a 16-bit field at offset 4. On Linux x86-64 it is a
+    32-bit field at offset 24; on Linux aarch64 it is at offset 16.
 
     Args:
         path: Filesystem path to inspect. Mutable only because passing a
@@ -812,15 +812,27 @@ def c_lstat_is_socket(mut path: String) -> c_int:
             return 1
         return 0
     else:
-        var mode = (
-            UInt32(buf[24])
-            | (UInt32(buf[25]) << 8)
-            | (UInt32(buf[26]) << 16)
-            | (UInt32(buf[27]) << 24)
-        )
-        if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
-            return 1
-        return 0
+        comptime if CompilationTarget.is_x86():
+            var mode = (
+                UInt32(buf[24])
+                | (UInt32(buf[25]) << 8)
+                | (UInt32(buf[26]) << 16)
+                | (UInt32(buf[27]) << 24)
+            )
+            if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+                return 1
+            return 0
+        else:
+            # Linux aarch64: st_dev + st_ino are 8 bytes each.
+            var mode = (
+                UInt32(buf[16])
+                | (UInt32(buf[17]) << 8)
+                | (UInt32(buf[18]) << 16)
+                | (UInt32(buf[19]) << 24)
+            )
+            if (mode & UInt32(S_IFMT)) == UInt32(S_IFSOCK):
+                return 1
+            return 0
 
 
 def c_inet_pton(af: Int, mut src: String, dst: MutPointer[UInt8, _]) -> c_int:
