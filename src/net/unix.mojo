@@ -403,7 +403,8 @@ struct UnixListener(Movable):
             remove_existing: Unlink an existing socket file at `path`
                 before binding (has no effect on abstract names). A
                 regular file or other non-socket at `path` is not
-                removed.
+                removed. The lstat/unlink pair is not atomic; use a
+                caller-owned directory that is not concurrently writable.
 
         Raises:
             If the path is invalid, already bound, or socket creation,
