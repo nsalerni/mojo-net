@@ -13,7 +13,31 @@ libc because the standard library has no socket API yet.
 ## Install
 
 ```sh
-curl -fsSL https://pixi.sh/install.sh | sh
+pixi init my-app && cd my-app
+```
+
+Add the Modular compiler and community channels to `pixi.toml`:
+
+```toml
+[workspace]
+channels = [
+    "https://conda.modular.com/max",
+    "https://repo.prefix.dev/modular-community",
+    "conda-forge",
+]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+```
+
+```sh
+pixi add mojo-net
+```
+
+Then `from net import TCPListener, TCPStream`. The package is on
+[modular-community](https://github.com/modular/modular-community).
+
+### From source (contributors)
+
+```sh
 git clone https://github.com/nsalerni/mojo-net.git
 cd mojo-net
 pixi install
@@ -63,6 +87,10 @@ See [examples/README.md](examples/README.md).
 
 Platforms: macOS (arm64) and Linux (x86-64, arm64).
 
+This package is the working prototype for a minimal `std.net`. See
+[docs/STDNET_RFC.md](docs/STDNET_RFC.md). If you currently bind
+`socket()` yourself, depend on `mojo-net` instead.
+
 `TCPListener("::1", port)` and `TCPListener("::", port)` bind IPv6. Whether
 `::` also accepts IPv4-mapped clients is OS-dependent. Bind `0.0.0.0` and
 `::` separately if you need both families.
@@ -87,9 +115,15 @@ pixi run compliance
 
 ## Related packages
 
+This is the socket layer for the Mojo networking stack:
+
 [mojo-tls](https://github.com/nsalerni/mojo-tls) ·
 [mojo-http2](https://github.com/nsalerni/mojo-http2) ·
+[protomojo](https://github.com/nsalerni/protomojo) ·
 [grpc-mojo](https://github.com/nsalerni/grpc-mojo)
+
+HTTP/1.1 servers should depend on `mojo-net` (and `mojo-tls`) rather than
+rebinding libc sockets. See [docs/STDNET_RFC.md](docs/STDNET_RFC.md).
 
 ## Contributing
 

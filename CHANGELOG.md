@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.7 - 2026-09-21
+
+- `UnixListener(..., remove_existing=True)` unlinks only an existing
+  socket file. A regular file at the bind path is left in place and the
+  bind fails with a typed error. Uses the Linux aarch64 `st_mode` offset.
+  The `lstat`/`unlink` pair is not atomic; see SECURITY.md.
+
 ## 0.2.6 - 2026-09-03
 
 - Added `Wakeup`, a POSIX self-pipe that can wake a blocked
