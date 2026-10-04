@@ -44,7 +44,7 @@ struct IPv4Address(Copyable, ImplicitlyCopyable, Movable, Writable):
 
         Args:
             host: Numeric dotted-quad address; each octet must be 0-255
-                in decimal with no leading zero, as `inet_pton` accepts.
+                in decimal with no leading zero, on every platform.
             port: Port number in host byte order.
 
         Raises:
@@ -59,7 +59,8 @@ struct IPv4Address(Copyable, ImplicitlyCopyable, Movable, Writable):
             var digits = parts[i].as_bytes()
             if len(digits) == 0 or len(digits) > 3:
                 raise Error("invalid IPv4 address: " + String(host))
-            # inet_pton rejects a leading zero; inet_aton reads it as octal.
+            # A leading zero is octal to inet_aton and is rejected by glibc
+            # inet_pton but read as decimal by macOS inet_pton.
             if len(digits) > 1 and digits[0] == UInt8(ord("0")):
                 raise Error("invalid IPv4 address: " + String(host))
             var v = 0

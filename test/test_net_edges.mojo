@@ -203,45 +203,55 @@ def test_ipv4_parse_edges() raises:
     )
 
 
-def test_ipv4_matches_inet_pton() raises:
-    # IPv4Address and SocketAddress.parse (platform inet_pton) must accept
-    # the same dotted quads and decode them to the same bytes. A leading
-    # zero is octal to inet_aton ("010" is 8), so accepting it as decimal
-    # would let one string name two different hosts.
+def test_ipv4_literal_rule_is_portable() raises:
+    # The platform inet_pton disagrees on leading-zero octets: glibc
+    # rejects "010.0.0.1", macOS reads it as 10.0.0.1, and inet_aton reads
+    # it as 8.0.0.1. IPv4Address and SocketAddress.parse must both give
+    # the result in this table on every platform ("" means rejected).
     var table = String()
     var mismatches = 0
-    for s in [
-        "0.0.0.0",
-        "10.0.0.1",
-        "127.0.0.1",
-        "255.255.255.255",
-        "1.2.3.40",
-        "01.2.3.4",
-        "010.0.0.1",
-        "00.0.0.0",
-        "127.0.0.01",
-        "1.2.3.004",
-        "1.2.3.256",
-        "1.2.3",
-        " 1.2.3.4",
-        "1.2.3.4.",
-        "127.1",
-        "0x7f.0.0.1",
-        "2130706433",
+    for row in [
+        ("0.0.0.0", "0.0.0.0"),
+        ("10.0.0.1", "10.0.0.1"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("255.255.255.255", "255.255.255.255"),
+        ("1.2.3.40", "1.2.3.40"),
+        ("01.2.3.4", ""),
+        ("010.0.0.1", ""),
+        ("00.0.0.0", ""),
+        ("127.0.0.01", ""),
+        ("1.2.3.004", ""),
+        ("1.2.3.256", ""),
+        ("1.2.3", ""),
+        (" 1.2.3.4", ""),
+        ("1.2.3.4.", ""),
+        ("127.1", ""),
+        ("0x7f.0.0.1", ""),
+        ("2130706433", ""),
+        ("::ffff:1.2.3.4", "::ffff:102:304"),
+        ("::ffff:01.2.3.4", ""),
+        ("::ffff:1.2.3.010", ""),
     ]:
-        var ours = String("reject")
+        var s = row[0]
+        var want = String("reject")
+        if row[1] != "":
+            want = String(SocketAddress.parse(row[1], 0))
+        var parsed = String("reject")
         try:
-            var a = IPv4Address(s, 0)
-            ours = String(SocketAddress.v4(a.a, a.b, a.c, a.d, 0))
+            parsed = String(SocketAddress.parse(s, 0))
         except:
             pass
-        var pton = String("reject")
-        try:
-            pton = String(SocketAddress.parse(s, 0))
-        except:
-            pass
-        table += repr(s) + " IPv4Address=" + ours + " parse=" + pton + "\n"
-        if ours != pton:
+        var v4 = want
+        if ":" not in s:
+            v4 = String("reject")
+            try:
+                var a = IPv4Address(s, 0)
+                v4 = String(SocketAddress.v4(a.a, a.b, a.c, a.d, 0))
+            except:
+                pass
+        table += repr(s) + " want=" + want + " parse=" + parsed
+        table += " IPv4Address=" + v4 + "\n"
+        if parsed != want or v4 != want:
             mismatches += 1
     assert_equal(mismatches, 0, "\n" + table)
 
@@ -632,8 +642,8 @@ def main() raises:
     test_from_sockaddr_errors()
     print("... test_ipv4_parse_edges")
     test_ipv4_parse_edges()
-    print("... test_ipv4_matches_inet_pton")
-    test_ipv4_matches_inet_pton()
+    print("... test_ipv4_literal_rule_is_portable")
+    test_ipv4_literal_rule_is_portable()
     print("... test_resolve_variants")
     test_resolve_variants()
     print("... test_connect_refused")

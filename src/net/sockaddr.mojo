@@ -17,6 +17,7 @@ a `sin_len` length byte followed by a one-byte family) and Linux
 
 from std.sys import CompilationTarget
 
+from .address import IPv4Address
 from .libc import AF_INET, af_inet6, c_inet_pton
 
 comptime SOCKADDR_STORAGE_LEN = 28
@@ -68,7 +69,10 @@ struct SocketAddress(Copyable, Equatable, Movable, Writable):
     def parse(literal: StringSpan, port: UInt16) raises -> SocketAddress:
         """Parses a numeric IPv4 ("1.2.3.4") or IPv6 ("::1") literal.
 
-        Tries `inet_pton` with AF_INET first, then AF_INET6.
+        IPv4 uses the `IPv4Address` dotted-quad rule rather than
+        `inet_pton(AF_INET)`, which accepts leading-zero octets on macOS
+        and rejects them on Linux. IPv6 uses `inet_pton(AF_INET6)`, and an
+        embedded dotted quad must also pass the IPv4 rule.
 
         Args:
             literal: The numeric IP literal to parse.
@@ -81,12 +85,23 @@ struct SocketAddress(Copyable, Equatable, Movable, Writable):
             On non-numeric hosts — use resolve() for hostnames.
         """
         var host = String(literal)
+        var err = Error("net: not a numeric IP literal: " + host)
+        if ":" not in literal:
+            try:
+                var a = IPv4Address(literal, port)
+                return SocketAddress.v4(a.a, a.b, a.c, a.d, port)
+            except:
+                raise err^
         var out = Array[UInt8, 16](fill=0)
-        if c_inet_pton(AF_INET, host, out.unsafe_ptr()) == 1:
-            return SocketAddress(is_v6=False, addr=out^, port=port, scope_id=0)
-        if c_inet_pton(af_inet6(), host, out.unsafe_ptr()) == 1:
-            return SocketAddress(is_v6=True, addr=out^, port=port, scope_id=0)
-        raise Error("net: not a numeric IP literal: " + host)
+        if c_inet_pton(af_inet6(), host, out.unsafe_ptr()) != 1:
+            raise err^
+        var tail = literal[byte = literal.rfind(":") + 1 :]
+        if "." in tail:
+            try:
+                _ = IPv4Address(tail, port)
+            except:
+                raise err^
+        return SocketAddress(is_v6=True, addr=out^, port=port, scope_id=0)
 
     def family(self) -> Int:
         """Returns the address family constant for this address.
