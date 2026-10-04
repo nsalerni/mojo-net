@@ -208,6 +208,8 @@ def test_ipv4_matches_inet_pton() raises:
     # the same dotted quads and decode them to the same bytes. A leading
     # zero is octal to inet_aton ("010" is 8), so accepting it as decimal
     # would let one string name two different hosts.
+    var table = String()
+    var mismatches = 0
     for s in [
         "0.0.0.0",
         "10.0.0.1",
@@ -223,25 +225,25 @@ def test_ipv4_matches_inet_pton() raises:
         "1.2.3",
         " 1.2.3.4",
         "1.2.3.4.",
+        "127.1",
+        "0x7f.0.0.1",
+        "2130706433",
     ]:
-        var ours_ok = True
-        var ours = IPv4Address(0, 0, 0, 0, 0)
+        var ours = String("reject")
         try:
-            ours = IPv4Address(s, 0)
+            var a = IPv4Address(s, 0)
+            ours = String(SocketAddress.v4(a.a, a.b, a.c, a.d, 0))
         except:
-            ours_ok = False
-        var pton_ok = True
-        var pton = SocketAddress.v4(0, 0, 0, 0, 0)
+            pass
+        var pton = String("reject")
         try:
-            pton = SocketAddress.parse(s, 0)
+            pton = String(SocketAddress.parse(s, 0))
         except:
-            pton_ok = False
-        assert_equal(ours_ok, pton_ok, "accept mismatch for " + repr(s))
-        if ours_ok:
-            assert_true(
-                SocketAddress.v4(ours.a, ours.b, ours.c, ours.d, 0) == pton,
-                "decode mismatch for " + repr(s),
-            )
+            pass
+        table += repr(s) + " IPv4Address=" + ours + " parse=" + pton + "\n"
+        if ours != pton:
+            mismatches += 1
+    assert_equal(mismatches, 0, "\n" + table)
 
 
 # --- resolve() hints and failures ---
