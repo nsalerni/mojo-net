@@ -203,6 +203,47 @@ def test_ipv4_parse_edges() raises:
     )
 
 
+def test_ipv4_matches_inet_pton() raises:
+    # IPv4Address and SocketAddress.parse (platform inet_pton) must accept
+    # the same dotted quads and decode them to the same bytes. A leading
+    # zero is octal to inet_aton ("010" is 8), so accepting it as decimal
+    # would let one string name two different hosts.
+    for s in [
+        "0.0.0.0",
+        "10.0.0.1",
+        "127.0.0.1",
+        "255.255.255.255",
+        "1.2.3.40",
+        "01.2.3.4",
+        "010.0.0.1",
+        "00.0.0.0",
+        "127.0.0.01",
+        "1.2.3.004",
+        "1.2.3.256",
+        "1.2.3",
+        " 1.2.3.4",
+        "1.2.3.4.",
+    ]:
+        var ours_ok = True
+        var ours = IPv4Address(0, 0, 0, 0, 0)
+        try:
+            ours = IPv4Address(s, 0)
+        except:
+            ours_ok = False
+        var pton_ok = True
+        var pton = SocketAddress.v4(0, 0, 0, 0, 0)
+        try:
+            pton = SocketAddress.parse(s, 0)
+        except:
+            pton_ok = False
+        assert_equal(ours_ok, pton_ok, "accept mismatch for " + repr(s))
+        if ours_ok:
+            assert_true(
+                SocketAddress.v4(ours.a, ours.b, ours.c, ours.d, 0) == pton,
+                "decode mismatch for " + repr(s),
+            )
+
+
 # --- resolve() hints and failures ---
 
 
@@ -589,6 +630,8 @@ def main() raises:
     test_from_sockaddr_errors()
     print("... test_ipv4_parse_edges")
     test_ipv4_parse_edges()
+    print("... test_ipv4_matches_inet_pton")
+    test_ipv4_matches_inet_pton()
     print("... test_resolve_variants")
     test_resolve_variants()
     print("... test_connect_refused")
