@@ -180,6 +180,22 @@ def test_ipv4_parse_edges() raises:
     _ = expect_raises(too_many, "5 octets")
     _ = expect_raises(empty, "empty host")
     _ = expect_raises(negative, "negative octet")
+    # Int() accepts these octet spellings; a dotted-quad literal must not.
+    for bad in [
+        " 1.2.3.4",
+        "1.2.3.4 ",
+        "1. 2.3.4",
+        "+1.2.3.4",
+        "-0.0.0.0",
+        "1_0.2.3.4",
+        "1..2.3",
+        "1.2.3.0256",
+    ]:
+        try:
+            _ = IPv4Address(bad, 1)
+            raise Error("expected rejection of " + repr(bad))
+        except e:
+            assert_true("invalid IPv4 address" in String(e), String(e))
     # Boundary values must be accepted.
     assert_equal(String(IPv4Address("0.0.0.0", 0)), "0.0.0.0:0")
     assert_equal(

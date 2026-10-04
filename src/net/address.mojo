@@ -54,8 +54,16 @@ struct IPv4Address(Copyable, ImplicitlyCopyable, Movable, Writable):
             raise Error("invalid IPv4 address: " + String(host))
         var octets = Array[UInt8, 4](fill=0)
         for i in range(4):
-            var v = Int(parts[i])
-            if v < 0 or v > 255:
+            # Int() alone would also accept whitespace, signs, and "_".
+            var digits = parts[i].as_bytes()
+            if len(digits) == 0 or len(digits) > 3:
+                raise Error("invalid IPv4 address: " + String(host))
+            var v = 0
+            for ch in digits:
+                if ch < UInt8(ord("0")) or ch > UInt8(ord("9")):
+                    raise Error("invalid IPv4 address: " + String(host))
+                v = v * 10 + Int(ch - UInt8(ord("0")))
+            if v > 255:
                 raise Error("invalid IPv4 address: " + String(host))
             octets[i] = UInt8(v)
         self.a = octets[0]
