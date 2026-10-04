@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `IPv4Address` rejects octets with a leading zero (`01.2.3.4`,
+  `010.0.0.1`), matching `inet_pton` and `SocketAddress.parse`.
+  `inet_aton` reads such octets as octal, so one string could name two
+  hosts.
+
 ## 0.2.7 - 2026-09-21
 
 - `UnixListener(..., remove_existing=True)` unlinks only an existing
