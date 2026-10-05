@@ -6,6 +6,10 @@
   `010.0.0.1`), matching `inet_pton` and `SocketAddress.parse`.
   `inet_aton` reads such octets as octal, so one string could name two
   hosts.
+- `set_read_timeout` and `set_write_timeout` round a positive timeout
+  below one microsecond up to one microsecond. It was truncated to a
+  zero `timeval`, which the kernel reads as "no timeout", so the socket
+  blocked forever.
 
 ## 0.2.7 - 2026-09-21
 

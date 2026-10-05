@@ -14,6 +14,7 @@
 # SIGPIPE suppression. Complements the happy-path tests in test_tcp.mojo
 # and test_net2.mojo.
 
+from std.ffi import c_int, external_call
 from std.sys import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 from std.time import sleep
@@ -34,6 +35,9 @@ from net.libc import (
     SOCK_DGRAM,
     _checked_sockaddr_len,
     af_inet6,
+    so_rcvtimeo,
+    so_sndtimeo,
+    sol_socket,
 )
 
 
@@ -400,6 +404,49 @@ def test_write_timeout_expires() raises:
     listener.close()
 
 
+def _timeout_is_set(fd: c_int, name: c_int) raises -> Bool:
+    """Reports whether the SO_RCVTIMEO/SO_SNDTIMEO timeval `name` is set."""
+    var tv = Array[UInt8, 16](fill=0)
+    var tv_len = c_int(16)
+    var rc = external_call["getsockopt", c_int](
+        fd, sol_socket(), name, tv.unsafe_ptr(), Pointer(to=tv_len)
+    )
+    assert_equal(rc, 0, "getsockopt timeval")
+    # tv_sec is 8 bytes on both OSes; tv_usec < 10^6 fits its low 4 bytes.
+    for i in range(12):
+        if tv[i] != 0:
+            return True
+    return False
+
+
+def test_sub_microsecond_timeout_still_bounds() raises:
+    var listener = TCPListener("127.0.0.1", 0)
+    var client = TCPStream.connect("127.0.0.1", listener.local_port)
+    var server_side = listener.accept()
+    client.set_read_timeout(1)
+    client.set_write_timeout(999)
+    assert_true(
+        _timeout_is_set(client.fd, so_rcvtimeo()),
+        "a 1ns read timeout must not clear SO_RCVTIMEO",
+    )
+    assert_true(
+        _timeout_is_set(client.fd, so_sndtimeo()),
+        "a 999ns write timeout must not clear SO_SNDTIMEO",
+    )
+    var timed_out = False
+    try:
+        _ = client.read_exact(1)
+    except e:
+        timed_out = True
+        assert_true(is_timeout_error(e), "must be the typed TIMEOUT_ERROR")
+    assert_true(timed_out)
+    client.set_read_timeout(0)
+    assert_false(_timeout_is_set(client.fd, so_rcvtimeo()), "0 clears it")
+    client.close()
+    server_side.close()
+    listener.close()
+
+
 def test_nodelay_toggle() raises:
     var listener = TCPListener("127.0.0.1", 0)
     var client = TCPStream.connect("127.0.0.1", listener.local_port)
@@ -658,6 +705,8 @@ def main() raises:
     test_write_timeout_set_clear()
     print("... test_write_timeout_expires")
     test_write_timeout_expires()
+    print("... test_sub_microsecond_timeout_still_bounds")
+    test_sub_microsecond_timeout_still_bounds()
     print("... test_nodelay_toggle")
     test_nodelay_toggle()
     print("... test_bytes_available")

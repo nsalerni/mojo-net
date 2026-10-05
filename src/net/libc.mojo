@@ -576,7 +576,8 @@ def c_setsockopt_timeval(
         level: Option level, normally `sol_socket()`.
         name: Option name, `so_rcvtimeo()` or `so_sndtimeo()`.
         nanos: Timeout in nanoseconds; truncated to microsecond
-            resolution. 0 clears the timeout.
+            resolution, except that a positive value below one
+            microsecond becomes one microsecond. 0 clears the timeout.
 
     Returns:
         0 on success, -1 on failure (errno is set).
@@ -584,6 +585,10 @@ def c_setsockopt_timeval(
     var buf = Array[UInt8, 16](fill=0)
     var secs = UInt64(nanos // 1_000_000_000)
     var usecs = UInt64((nanos % 1_000_000_000) // 1000)
+    # A zero timeval means "no timeout", so truncation must not turn a
+    # positive bound into an unbounded wait.
+    if nanos > 0 and secs == 0 and usecs == 0:
+        usecs = 1
     for i in range(8):
         buf[i] = UInt8((secs >> UInt64(8 * i)) & 0xFF)
     comptime if CompilationTarget.is_macos():
