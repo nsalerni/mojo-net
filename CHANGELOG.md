@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Blocking `recv`, `send`, `accept`, `sendto`, and `recvfrom` retry when
+  a signal interrupts them. `Poller.wait` retries with the time still
+  left on its deadline. An interrupted blocking `connect` waits until
+  the socket is writable and reads `SO_ERROR`, instead of calling
+  `connect` again. `close` is not retried. A retried receive or send
+  starts its socket timeout over.
 - `IPv4Address` rejects octets with a leading zero (`01.2.3.4`,
   `010.0.0.1`), matching `inet_pton` and `SocketAddress.parse`.
   `inet_aton` reads such octets as octal, so one string could name two

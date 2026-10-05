@@ -19,7 +19,9 @@ address.mojo and sockaddr.mojo.
 
 The `c_*` functions are thin syscall wrappers: they return the raw libc
 result and never raise; callers check the result and raise via `os_error()`.
-Constant values were verified against the macOS and Linux system headers.
+`recv`, `send`, `accept`, `sendto`, and `recvfrom` retry when a signal
+interrupts them. `close` and `connect` do not. Constant values were
+verified against the macOS and Linux system headers.
 """
 
 from std.ffi import external_call, c_int, c_ssize_t, get_errno
@@ -190,6 +192,29 @@ def einprogress() -> Int:
         return 115
 
 
+def eintr() -> Int:
+    """Returns EINTR, the errno for a signal-interrupted syscall.
+
+    The value is 4 on both macOS and Linux.
+
+    Returns:
+        4.
+    """
+    return 4
+
+
+def eisconn() -> Int:
+    """Returns the platform's EISCONN errno value.
+
+    Returns:
+        56 on macOS, 106 on Linux.
+    """
+    comptime if CompilationTarget.is_macos():
+        return 56
+    else:
+        return 106
+
+
 # --- errno ---
 
 
@@ -236,8 +261,20 @@ def os_error(var context: String) -> Error:
     Returns:
         An `Error` describing the failure.
     """
-    var e = get_errno()
-    var code = e.value
+    return _error_for_errno(Int(get_errno().value), context^)
+
+
+def _error_for_errno(code: Int, var context: String) -> Error:
+    """Maps `code` to a typed `Error`, or "context: errno N".
+
+    Args:
+        code: An errno value, such as one read from `SO_ERROR`.
+        context: Label for the failing operation, e.g. "recv" or "bind".
+
+    Returns:
+        `TIMEOUT_ERROR`, `CONNECTION_REFUSED_ERROR`,
+        `CONNECTION_RESET_ERROR`, or "context: errno N".
+    """
     comptime if CompilationTarget.is_macos():
         if code == 35:  # EAGAIN == EWOULDBLOCK
             return Error(TIMEOUT_ERROR)
@@ -371,7 +408,8 @@ def c_accept(
 ) -> c_int:
     """Calls `accept(2)` to take the next connection off the listen queue.
 
-    Blocks until a connection arrives.
+    Blocks until a connection arrives. A signal that interrupts the call
+    is retried.
 
     Args:
         fd: The listening socket file descriptor.
@@ -382,7 +420,12 @@ def c_accept(
         The connected socket's file descriptor, or a negative value on
         failure (errno is set).
     """
-    return external_call["accept", c_int](fd, addr, addr_len)
+    while True:
+        var accepted = external_call["accept", c_int](fd, addr, addr_len)
+        if accepted >= 0:
+            return accepted
+        if Int(get_errno().value) != eintr():
+            return accepted
 
 
 def c_connect(fd: c_int, addr: ImmPointer[UInt8, _], addr_len: Int) -> c_int:
@@ -407,7 +450,8 @@ def c_send(
     """Calls `send(2)` to transmit bytes on a connected socket.
 
     May send fewer than `length` bytes; callers loop (see
-    `TCPStream.write_all`).
+    `TCPStream.write_all`). A signal that interrupts the call before any
+    byte is sent is retried. A send timeout starts over on that retry.
 
     Args:
         fd: The socket file descriptor.
@@ -419,7 +463,12 @@ def c_send(
         The number of bytes sent, or a negative value on failure
         (errno is set).
     """
-    return Int(external_call["send", Int](fd, buf, length, flags))
+    while True:
+        var n = Int(external_call["send", Int](fd, buf, length, flags))
+        if n >= 0:
+            return n
+        if Int(get_errno().value) != eintr():
+            return n
 
 
 def c_recv(
@@ -428,7 +477,8 @@ def c_recv(
     """Calls `recv(2)` to receive bytes from a connected socket.
 
     Blocks until data is available (or a configured receive timeout
-    expires).
+    expires). A signal that interrupts the call is retried, and the
+    receive timeout starts over on that retry.
 
     Args:
         fd: The socket file descriptor.
@@ -440,7 +490,12 @@ def c_recv(
         The number of bytes received, 0 on orderly EOF, or a negative
         value on failure (errno is set).
     """
-    return Int(external_call["recv", Int](fd, buf, length, flags))
+    while True:
+        var n = Int(external_call["recv", Int](fd, buf, length, flags))
+        if n >= 0:
+            return n
+        if Int(get_errno().value) != eintr():
+            return n
 
 
 def c_ioctl_fionread(fd: c_int) -> Int:
@@ -471,6 +526,9 @@ def c_ioctl_fionread(fd: c_int) -> Int:
 
 def c_close(fd: c_int) -> c_int:
     """Calls `close(2)` to release a file descriptor.
+
+    Not retried when a signal interrupts it. On Linux the descriptor can
+    already be released, and a retry can close a different file.
 
     Args:
         fd: The file descriptor to close.
@@ -612,6 +670,8 @@ def c_sendto(
 ) -> Int:
     """Calls `sendto(2)` to transmit one datagram to an explicit address.
 
+    A signal that interrupts the call before any byte is sent is retried.
+
     Args:
         fd: The socket file descriptor.
         buf: Pointer to the datagram payload.
@@ -624,11 +684,16 @@ def c_sendto(
         The number of bytes sent, or a negative value on failure
         (errno is set).
     """
-    return Int(
-        external_call["sendto", Int](
-            fd, buf, length, flags, addr, c_int(addr_len)
+    while True:
+        var n = Int(
+            external_call["sendto", Int](
+                fd, buf, length, flags, addr, c_int(addr_len)
+            )
         )
-    )
+        if n >= 0:
+            return n
+        if Int(get_errno().value) != eintr():
+            return n
 
 
 def c_recvfrom(
@@ -642,7 +707,9 @@ def c_recvfrom(
     """Calls `recvfrom(2)` to receive one datagram and its sender address.
 
     Blocks until a datagram arrives (or a configured receive timeout
-    expires). A datagram larger than `length` is truncated.
+    expires). A datagram larger than `length` is truncated. A signal
+    that interrupts the call is retried, and the receive timeout starts
+    over on that retry.
 
     Args:
         fd: The socket file descriptor.
@@ -656,9 +723,16 @@ def c_recvfrom(
         The number of bytes received, or a negative value on failure
         (errno is set).
     """
-    return Int(
-        external_call["recvfrom", Int](fd, buf, length, flags, addr, addr_len)
-    )
+    while True:
+        var n = Int(
+            external_call["recvfrom", Int](
+                fd, buf, length, flags, addr, addr_len
+            )
+        )
+        if n >= 0:
+            return n
+        if Int(get_errno().value) != eintr():
+            return n
 
 
 def c_pipe(fds: MutPointer[c_int, _]) -> c_int:

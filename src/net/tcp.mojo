@@ -56,7 +56,10 @@ from .libc import (
     c_getsockopt_int,
     c_socket,
     _checked_sockaddr_len,
+    _error_for_errno,
     einprogress,
+    eintr,
+    eisconn,
     is_timeout_error,
     msg_nosignal,
     o_nonblock,
@@ -105,6 +108,62 @@ def _is_connect_timeout_errno(errno: Int) -> Bool:
         return errno == 60  # ETIMEDOUT
     else:
         return errno == 110  # ETIMEDOUT
+
+
+def _read_so_error(fd: c_int) raises -> Int:
+    """Reads and clears SO_ERROR on an unwrapped socket.
+
+    Args:
+        fd: The socket descriptor.
+
+    Returns:
+        0 when the socket has no pending error, otherwise the errno.
+
+    Raises:
+        If `getsockopt` fails.
+    """
+    var value = c_int(0)
+    if c_getsockopt_int(fd, sol_socket(), so_error(), Pointer(to=value)) != 0:
+        raise os_error("getsockopt(SO_ERROR)")
+    return Int(value)
+
+
+def _blocking_connect(
+    fd: c_int,
+    addr: ImmPointer[UInt8, _],
+    addr_len: Int,
+    context: String,
+) raises:
+    """Completes a blocking connect.
+
+    If a signal interrupts `connect(2)`, the handshake keeps running.
+    This waits until the socket is writable, then reads SO_ERROR.
+    0 and EISCONN mean the socket is connected.
+
+    Args:
+        fd: A blocking socket.
+        addr: The peer's packed sockaddr.
+        addr_len: Length of `addr` in bytes.
+        context: Label included in the error when the connect fails.
+
+    Raises:
+        The connect failure. Refused and reset errors stay typed.
+    """
+    if c_connect(fd, addr, addr_len) == 0:
+        return
+    if Int(get_errno().value) != eintr():
+        raise os_error(String(context))
+    var poller = Poller()
+    poller.register(fd, readable=False, writable=True)
+    while True:
+        var events = poller.wait(-1)
+        if len(events) == 0:
+            continue
+        var code = _read_so_error(fd)
+        poller.close()
+        if code == 0 or code == eisconn():
+            return
+        raise _error_for_errno(code, String(context))
 
 
 def _timed_connect_addr(
@@ -241,7 +300,9 @@ struct TCPStream(ReadinessStream):
         Raises:
             If resolution fails or no address accepts the connection
             (the error reflects the last attempt), including the typed
-            `TIMEOUT_ERROR` when `timeout_ns` expires.
+            `TIMEOUT_ERROR` when `timeout_ns` expires. A signal during a
+            blocking connect does not fail the call. The handshake is
+            waited out and its error is reported instead.
         """
         var addrs: List[SocketAddress]
         try:
@@ -259,10 +320,18 @@ struct TCPStream(ReadinessStream):
         for a in addrs:
             var fd = _new_tcp_socket(a.family())
             var packed = a.to_sockaddr()
-            if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) == 0:
-                return TCPStream(fd)
-            last_err = os_error("connect " + String(a))
-            _ = c_close(fd)
+            try:
+                _blocking_connect(
+                    fd,
+                    packed[0].unsafe_ptr(),
+                    packed[1],
+                    "connect " + String(a),
+                )
+            except e:
+                last_err = e^
+                _ = c_close(fd)
+                continue
+            return TCPStream(fd)
         raise last_err
 
     @staticmethod
@@ -283,16 +352,24 @@ struct TCPStream(ReadinessStream):
 
         Raises:
             If socket creation or the connection fails, including the
-            typed `TIMEOUT_ERROR` when `timeout_ns` expires.
+            typed `TIMEOUT_ERROR` when `timeout_ns` expires. A signal
+            during a blocking connect does not fail the call. The
+            handshake is waited out and its error is reported instead.
         """
         if timeout_ns > 0:
             return _timed_connect_addr(addr, timeout_ns)
         var fd = _new_tcp_socket(addr.family())
         var packed = addr.to_sockaddr()
-        if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) != 0:
-            var err = os_error("connect " + String(addr))
+        try:
+            _blocking_connect(
+                fd,
+                packed[0].unsafe_ptr(),
+                packed[1],
+                "connect " + String(addr),
+            )
+        except e:
             _ = c_close(fd)
-            raise err
+            raise e
         return TCPStream(fd)
 
     @staticmethod
