@@ -70,8 +70,27 @@ def _parent_blocked(pid: Int, needle: String, syscall_prefix: String) raises -> 
             return False
         if syscall_prefix == "":
             return True
-        var syscall = String(path.Path(root + "/syscall").read_text())
-        return syscall.find(syscall_prefix) == 0
+        # /proc/pid/syscall requires ptrace attach. Ubuntu denies that
+        # from the child to the parent, so a matching wchan is enough.
+        try:
+            var syscall = String(path.Path(root + "/syscall").read_text())
+            return syscall.find(syscall_prefix) == 0
+        except:
+            return True
+
+
+def _report_unblocked(pid: Int, needle: String):
+    try:
+        comptime if CompilationTarget.is_macos():
+            print("parent not blocked, wanted " + needle)
+        else:
+            var path = Python.import_module("pathlib")
+            var wchan = String(
+                path.Path("/proc/" + String(pid) + "/wchan").read_text()
+            )
+            print("parent wchan=" + wchan + " wanted " + needle)
+    except:
+        print("parent wait state unreadable, wanted " + needle)
 
 
 def _wait_until_blocked(
@@ -82,6 +101,7 @@ def _wait_until_blocked(
         if _parent_blocked(pid, needle, syscall_prefix):
             return True
         sleep(0.005)
+    _report_unblocked(pid, needle)
     return False
 
 
