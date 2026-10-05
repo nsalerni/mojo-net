@@ -26,10 +26,11 @@ architectures; kqueue signals peer hangup with EV_EOF on the read filter,
 epoll with EPOLLHUP/EPOLLRDHUP.
 """
 
-from std.ffi import c_int, external_call
+from std.ffi import c_int, external_call, get_errno
 from std.sys import CompilationTarget
+from std.time import perf_counter_ns
 
-from .libc import c_close, os_error
+from .libc import c_close, eintr, os_error
 
 # kqueue constants (macOS).
 comptime _EVFILT_READ = -1
@@ -51,6 +52,26 @@ comptime _EPOLLHUP = 0x010
 comptime _EPOLLRDHUP = 0x2000
 
 comptime _MAX_EVENTS = 64
+comptime _MAX_POLL_MS = 2_147_483_647
+
+
+def _remaining_ms(deadline_ns: Int) -> Int:
+    """Milliseconds left until `deadline_ns`, rounded up, or 0 if it passed.
+
+    Args:
+        deadline_ns: Absolute monotonic deadline, in nanoseconds.
+
+    Returns:
+        The next wait length in milliseconds, at most `_MAX_POLL_MS`.
+    """
+    var now = Int(perf_counter_ns())
+    if now >= deadline_ns:
+        return 0
+    var left = deadline_ns - now
+    var ms = Int((left + 999_999) // 1_000_000)
+    if ms > _MAX_POLL_MS:
+        return _MAX_POLL_MS
+    return ms
 
 
 def _epoll_event_len() -> Int:
@@ -227,6 +248,12 @@ struct Poller(Movable):
     def wait(self, timeout_ms: Int) raises -> List[PollEvent]:
         """Blocks until at least one watched descriptor is ready.
 
+        A signal that interrupts the kernel wait is retried. The retry
+        waits only for the time still left, measured from the start of
+        this call. An empty result means the deadline passed with
+        nothing ready. A negative `timeout_ms` has no deadline, so an
+        interrupt starts the wait over.
+
         Args:
             timeout_ms: Longest time to wait in milliseconds; 0 polls
                 without blocking, and a negative value waits indefinitely.
@@ -238,6 +265,30 @@ struct Poller(Movable):
         Raises:
             If the kernel wait call fails.
         """
+        var infinite = timeout_ms < 0
+        var deadline = 0
+        if not infinite:
+            var budget = timeout_ms
+            if budget > _MAX_POLL_MS:
+                budget = _MAX_POLL_MS
+            deadline = Int(perf_counter_ns()) + budget * 1_000_000
+        var slice = timeout_ms
+        if slice > _MAX_POLL_MS:
+            slice = _MAX_POLL_MS
+        while True:
+            var interrupted = False
+            var events = self._wait_once(slice, interrupted)
+            if not interrupted:
+                return events^
+            if infinite:
+                slice = -1
+            else:
+                slice = _remaining_ms(deadline)
+
+    def _wait_once(
+        self, timeout_ms: Int, mut interrupted: Bool
+    ) raises -> List[PollEvent]:
+        interrupted = False
         var out = List[PollEvent]()
         comptime if CompilationTarget.is_macos():
             var events = Array[UInt8, 2048](fill=0)  # 64 * 32 bytes
@@ -260,6 +311,9 @@ struct Poller(Movable):
                 ts.unsafe_ptr(),
             )
             if n < 0:
+                if Int(get_errno().value) == eintr():
+                    interrupted = True
+                    return out^
                 raise os_error("kevent")
             for i in range(Int(n)):
                 var base = i * _KEVENT_LEN
@@ -296,6 +350,9 @@ struct Poller(Movable):
                 c_int(timeout_ms),
             )
             if n < 0:
+                if Int(get_errno().value) == eintr():
+                    interrupted = True
+                    return out^
                 raise os_error("epoll_wait")
             for i in range(Int(n)):
                 var base = i * elen

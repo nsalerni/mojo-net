@@ -38,7 +38,6 @@ from .libc import (
     c_accept,
     c_bind,
     c_close,
-    c_connect,
     c_fcntl,
     c_getpeername,
     c_getsockname,
@@ -52,7 +51,7 @@ from .libc import (
 )
 from .sockaddr import SOCKADDR_STORAGE_LEN
 from .stream import ReadinessStream
-from .tcp import TCPStream, _new_tcp_socket
+from .tcp import TCPStream, _blocking_connect, _new_tcp_socket
 
 comptime _SOCKADDR_UN_LEN = 110
 """Buffer size covering sockaddr_un on both platforms (Linux is largest)."""
@@ -237,10 +236,16 @@ struct UnixStream(ReadinessStream):
         """
         var packed = _pack_sockaddr_un(path)
         var fd = _new_tcp_socket(AF_UNIX)
-        if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) != 0:
-            var err = os_error("connect " + String(path))
+        try:
+            _blocking_connect(
+                fd,
+                packed[0].unsafe_ptr(),
+                packed[1],
+                "connect " + String(path),
+            )
+        except e:
             _ = c_close(fd)
-            raise err
+            raise e
         return UnixStream(stream=TCPStream(fd))
 
     def read(self, mut buf: List[Byte]) raises -> Int:
