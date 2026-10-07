@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.8 - 2026-10-06
+
 - Blocking `recv`, `send`, `accept`, `sendto`, and `recvfrom` retry when
   a signal interrupts them. `Poller.wait` retries with the time still
   left on its deadline. An interrupted blocking `connect` waits until
@@ -12,6 +14,10 @@
   `010.0.0.1`), matching `inet_pton` and `SocketAddress.parse`.
   `inet_aton` reads such octets as octal, so one string could name two
   hosts.
+- `IPv4Address` rejects an octet that is not one to three decimal digits.
+  Whitespace, a sign, or an underscore (` 1.2.3.4`, `+1.2.3.4`,
+  `1_0.2.3.4`) no longer parses as a different address.
+  `SocketAddress.parse` uses the same rule.
 - `set_read_timeout` and `set_write_timeout` round a positive timeout
   below one microsecond up to one microsecond. It was truncated to a
   zero `timeval`, which the kernel reads as "no timeout", so the socket
