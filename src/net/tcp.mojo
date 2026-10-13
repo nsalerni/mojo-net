@@ -166,10 +166,32 @@ def _blocking_connect(
         raise _error_for_errno(code, String(context))
 
 
+def _raise_connect_failure(addr: SocketAddress, code: Int) raises:
+    """Raises a connect failure, keeping refused and reset errors typed.
+
+    Args:
+        addr: The peer that rejected the handshake.
+        code: An errno from `connect(2)` or `SO_ERROR`.
+
+    Raises:
+        `TIMEOUT_ERROR` for `ETIMEDOUT`, `CONNECTION_REFUSED_ERROR` for
+        `ECONNREFUSED`, `CONNECTION_RESET_ERROR` for `ECONNRESET` or
+        `EPIPE`, and `connect <addr>: errno N` for anything else.
+    """
+    if _is_connect_timeout_errno(code):
+        raise Error(TIMEOUT_ERROR)
+    raise _error_for_errno(code, "connect " + String(addr))
+
+
 def _timed_connect_addr(
     addr: SocketAddress, timeout_ns: Int64
 ) raises -> TCPStream:
-    """Completes a non-blocking connect, waiting at most `timeout_ns`."""
+    """Completes a non-blocking connect, waiting at most `timeout_ns`.
+
+    A refused or reset peer raises the typed connection error. The
+    deadline raises `TIMEOUT_ERROR`, including when the kernel reports
+    `ETIMEDOUT`.
+    """
     var stream = TCPStream.connect_addr_nonblocking(addr)
     var poller = Poller()
     poller.register(stream.descriptor(), readable=False, writable=True)
@@ -180,9 +202,7 @@ def _timed_connect_addr(
     var so = stream.connect_error()
     if so != 0:
         stream.close()
-        if _is_connect_timeout_errno(so):
-            raise Error(TIMEOUT_ERROR)
-        raise Error("connect " + String(addr) + ": errno " + String(so))
+        _raise_connect_failure(addr, so)
     stream.set_nonblocking(False)
     return stream^
 
@@ -299,10 +319,13 @@ struct TCPStream(ReadinessStream):
 
         Raises:
             If resolution fails or no address accepts the connection
-            (the error reflects the last attempt), including the typed
-            `TIMEOUT_ERROR` when `timeout_ns` expires. A signal during a
-            blocking connect does not fail the call. The handshake is
-            waited out and its error is reported instead.
+            (the error reflects the last attempt). A refused peer is
+            `CONNECTION_REFUSED_ERROR` and a reset peer is
+            `CONNECTION_RESET_ERROR`, including when `timeout_ns` is
+            set. Expiry of that bound is the typed `TIMEOUT_ERROR`.
+            A signal during a blocking connect does not fail the call.
+            The handshake is waited out and its error is reported
+            instead.
         """
         var addrs: List[SocketAddress]
         try:
@@ -351,10 +374,13 @@ struct TCPStream(ReadinessStream):
             A connected stream.
 
         Raises:
-            If socket creation or the connection fails, including the
-            typed `TIMEOUT_ERROR` when `timeout_ns` expires. A signal
-            during a blocking connect does not fail the call. The
-            handshake is waited out and its error is reported instead.
+            If socket creation or the connection fails. A refused peer
+            is `CONNECTION_REFUSED_ERROR` and a reset peer is
+            `CONNECTION_RESET_ERROR`, including when `timeout_ns` is
+            set. Expiry of that bound is the typed `TIMEOUT_ERROR`.
+            A signal during a blocking connect does not fail the call.
+            The handshake is waited out and its error is reported
+            instead.
         """
         if timeout_ns > 0:
             return _timed_connect_addr(addr, timeout_ns)
@@ -388,7 +414,8 @@ struct TCPStream(ReadinessStream):
 
         Raises:
             If socket creation fails, or the connect fails immediately
-            with anything other than in-progress.
+            with anything other than in-progress. An immediate refusal
+            or reset is the typed connection error.
         """
         var fd = _new_tcp_socket(addr.family())
         var flags = c_fcntl(fd, F_GETFL, 0)
@@ -398,13 +425,10 @@ struct TCPStream(ReadinessStream):
             raise ferr
         var packed = addr.to_sockaddr()
         if c_connect(fd, packed[0].unsafe_ptr(), packed[1]) != 0:
-            var e = get_errno()
-            if Int(e.value) != einprogress():
-                var err = Error(
-                    "connect " + String(addr) + ": errno " + String(e.value)
-                )
+            var code = Int(get_errno().value)
+            if code != einprogress():
                 _ = c_close(fd)
-                raise err
+                _raise_connect_failure(addr, code)
         var stream = TCPStream(fd)
         stream.nonblocking = True
         return stream^
