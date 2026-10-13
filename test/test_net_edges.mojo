@@ -298,6 +298,12 @@ def closed_port() raises -> UInt16:
     return port
 
 
+def _assert_refused(msg: String) raises:
+    assert_true(is_connection_refused(Error(msg)), msg)
+    assert_false(is_timeout_error(Error(msg)), "refusal is not a timeout")
+    assert_false("errno" in msg, msg)
+
+
 def test_connect_refused() raises:
     var port = closed_port()
     var msg = String("")
@@ -305,8 +311,27 @@ def test_connect_refused() raises:
         _ = TCPStream.connect("127.0.0.1", port)
     except e:
         msg = String(e)
-    assert_true(is_connection_refused(Error(msg)), msg)
-    assert_false(is_timeout_error(Error(msg)), "refusal is not a timeout")
+    _assert_refused(msg)
+
+
+def test_timed_connect_refused_is_typed() raises:
+    # The bounded connect takes the non-blocking path. A closed port must
+    # still be CONNECTION_REFUSED_ERROR, not "connect <addr>: errno N".
+    var port = closed_port()
+    var msg = String("")
+    try:
+        _ = TCPStream.connect("127.0.0.1", port, timeout_ns=2_000_000_000)
+    except e:
+        msg = String(e)
+    _assert_refused(msg)
+
+    var addr = SocketAddress.parse("127.0.0.1", port)
+    var addr_msg = String("")
+    try:
+        _ = TCPStream.connect_addr(addr, timeout_ns=2_000_000_000)
+    except e:
+        addr_msg = String(e)
+    _assert_refused(addr_msg)
 
 
 def test_connect_addr() raises:
@@ -695,6 +720,8 @@ def main() raises:
     test_resolve_variants()
     print("... test_connect_refused")
     test_connect_refused()
+    print("... test_timed_connect_refused_is_typed")
+    test_timed_connect_refused_is_typed()
     print("... test_connect_addr")
     test_connect_addr()
     print("... test_connect_timeout_is_typed")

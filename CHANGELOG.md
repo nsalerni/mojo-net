@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A timed `TCPStream.connect` / `connect_addr`, and a non-blocking connect
+  that fails before the handshake starts, report a refused or reset peer
+  as `CONNECTION_REFUSED_ERROR` / `CONNECTION_RESET_ERROR`. Those
+  failures were `connect <addr>: errno N`. A connect that reaches its
+  `timeout_ns` bound is still `TIMEOUT_ERROR`.
+
 ## 0.2.8 - 2026-10-06
 
 - Blocking `recv`, `send`, `accept`, `sendto`, and `recvfrom` retry when
