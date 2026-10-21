@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.9 - 2026-10-21
+
 - A timed `TCPStream.connect` / `connect_addr`, and a non-blocking connect
   that fails before the handshake starts, report a refused or reset peer
   as `CONNECTION_REFUSED_ERROR` / `CONNECTION_RESET_ERROR`. Those
